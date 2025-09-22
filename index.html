@@ -12,11 +12,14 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
 
-<!-- PapaParse para leer CSV -->
+<!-- PapaParse para leer CSV (fallback) -->
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-<!-- NUEVO: TopoJSON para provincias.topo.json -->
+<!-- TopoJSON para provincias.topo.json -->
 <script src="https://unpkg.com/topojson-client@3"></script>
+
+<!-- Supabase UMD (SOLO una vez, antes de app.js) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
 <style>
   :root{
@@ -97,7 +100,7 @@
       </div>
 
       <div style="margin-top:10px" class="muted">
-        <b>Fuentes:</b> data/distritos.csv (obligatorio), <b>data/provincias.topo.json</b> (opcional), data/logo.png (opcional)
+        <b>Fuentes:</b> Supabase (lectura) · <code>data/distritos.csv</code> (fallback) · <code>data/provincias.topo.json</code> (opcional)
       </div>
     </div>
 
@@ -105,25 +108,12 @@
   </div>
 </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  
-<!-- Carga supabase-js (ESM) -->
-<script type="module">
-  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-  // ⚠️ Reemplaza por tus valores de Settings → API
-  const SUPABASE_URL = 'https://eunujfywdwipguopstru.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs';
-
-  // Exponer en window para usar en app.js
-  window.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-</script>
-
-  
-<!-- Lógica -->
+<!-- Tu lógica principal (USA Supabase si está configurado en app.js) -->
 <script src="app.js"></script>
 </body>
 </html>
+
+
 
 
 

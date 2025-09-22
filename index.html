@@ -105,8 +105,22 @@
   </div>
 </div>
 
+<!-- Carga supabase-js (ESM) -->
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  // ⚠️ Reemplaza por tus valores de Settings → API
+  const SUPABASE_URL = 'https://eunujfywdwipguopstru.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs';
+
+  // Exponer en window para usar en app.js
+  window.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
+
+  
 <!-- Lógica -->
 <script src="app.js"></script>
 </body>
 </html>
+
 

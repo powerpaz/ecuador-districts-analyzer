@@ -1,3 +1,16 @@
+// --- CONFIG ---
+const USE_SUPABASE = true;
+const SUPABASE = {
+  // 👇 tu URL real de proyecto (la de Settings → API)
+  url: 'https://eunujfywdwipguopstru.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs', // deja el que ya tienes si es correcto
+};
+
+// ...luego, en el mapa, corrige el tile de satélite:
+const sat = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution: '© Esri' }
+);
 /* =================== CONFIG =================== */
 const PATHS = {
   csv: 'data/distritos.csv',

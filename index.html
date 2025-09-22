@@ -15,6 +15,9 @@
 <!-- PapaParse para leer CSV -->
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
+<!-- NUEVO: TopoJSON para provincias.topo.json -->
+<script src="https://unpkg.com/topojson-client@3"></script>
+
 <style>
   :root{
     --bg:#07162f; --card:#0d2249; --muted:#99a2b1; --grad1:#5b7cff; --grad2:#7a4ad8;
@@ -94,7 +97,7 @@
       </div>
 
       <div style="margin-top:10px" class="muted">
-        <b>Fuentes:</b> data/distritos.csv (obligatorio), data/provincias.geojson (opcional), data/logo.png (opcional)
+        <b>Fuentes:</b> data/distritos.csv (obligatorio), <b>data/provincias.topo.json</b> (opcional), data/logo.png (opcional)
       </div>
     </div>
 
@@ -106,3 +109,4 @@
 <script src="app.js"></script>
 </body>
 </html>
+

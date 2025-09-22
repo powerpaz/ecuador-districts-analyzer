@@ -1,32 +1,20 @@
-// --- CONFIG ---
-const USE_SUPABASE = true;
-const SUPABASE = {
-  // 👇 tu URL real de proyecto (la de Settings → API)
-  url: 'https://eunujfywdwipguopstru.supabase.co',
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs', // deja el que ya tienes si es correcto
-};
-
-// ...luego, en el mapa, corrige el tile de satélite:
-const sat = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { attribution: '© Esri' }
-);
 /* =================== CONFIG =================== */
 const PATHS = {
   csv: 'data/distritos.csv',
-  provincias: 'data/provincias.topo.json',      // preferido (liviano)
-  provinciasFallback: 'data/provincias.geojson',// fallback si no hay topo
-  logo: 'data/logo.png'                         // opcional
+  provincias: 'data/provincias.topo.json',       // preferido (TopoJSON liviano)
+  provinciasFallback: 'data/provincias.geojson', // fallback si no hay topo
+  logo: 'data/logo.png'                          // opcional
 };
 // Fuerza contador fijo (ej. 140). null = dinámico
 const FORCE_COUNT = null;
 
-// Activa lectura desde Supabase (si index.html incluye el SDK UMD)
+// === Supabase (usa el SDK UMD que incluyes en index.html) ===
 const USE_SUPABASE = true;
-// Pon aquí tus credenciales públicas de Supabase
 const SUPABASE = {
-  url: 'https://esm.sh/@supabase/supabase-js@2', // ← reemplaza
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs'                  // ← reemplaza
+  // ⚠️ Tu URL real del proyecto (Settings → API)
+  url: 'https://eunujfywdwipguopstru.supabase.co',
+  // ⚠️ Tu anon key pública (puede quedar en frontend)
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs'
 };
 
 /* ===== Utils ===== */
@@ -68,6 +56,13 @@ function popupHTML(c){
     </div></div>`;
 }
 
+// Acento-insensible / case-insensitive para búsqueda
+function norm(s){ return (s ?? '')
+  .toString()
+  .normalize('NFD')
+  .replace(/\p{Diacritic}/gu,'')
+  .toLowerCase(); }
+
 /* ===== Estado global ===== */
 let records = [];       // base
 let filtered = [];      // filtrada
@@ -78,10 +73,16 @@ let selectedCats = new Set();
 let provLayer=null;
 let supabaseClient = null;
 
+// Índice de búsqueda
+let SEARCH = { index: [] };
+
 /* ===== Mapa ===== */
 const map = L.map('map', { zoomControl:true }).setView([-1.8312, -78.1834], 6);
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap'}).addTo(map);
-const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri' });
+const sat = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution:'© Esri' }
+);
 L.control.layers({"Mapa Estándar":osm,"Vista Satelital":sat},{},{collapsed:false}).addTo(map);
 const cluster = L.markerClusterGroup({
   chunkedLoading:true,
@@ -160,10 +161,8 @@ async function loadCSV(){
 
 /* ===== Supabase ===== */
 function initSupabase(){
-  // Requiere incluir en index.html:
-  // <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   if (!USE_SUPABASE) return null;
-  if (!window.supabase) return null;
+  if (!window.supabase || !window.supabase.createClient) return null;
   if (!SUPABASE.url || !SUPABASE.anonKey) return null;
   try{
     return window.supabase.createClient(SUPABASE.url, SUPABASE.anonKey);
@@ -195,6 +194,98 @@ async function loadFromSupabase(client){
     Number.isFinite(d.lat) && Number.isFinite(d.lng) &&
     d.lat>=-5.8 && d.lat<=2.2 && d.lng>=-92.5 && d.lng<=-74.0
   );
+}
+
+/* ===== Búsqueda avanzada + Autocomplete ===== */
+function buildSearchIndex(){
+  SEARCH.index = records.map(r => ({
+    r,
+    text: norm(`${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''} ${r.provincia||''} ${r.canton||''}`)
+  }));
+}
+
+function searchTop(q, limit=8){
+  q = norm(q);
+  if(!q) return [];
+  const words = q.split(/\s+/).filter(Boolean);
+  const out = [];
+  for(const item of SEARCH.index){
+    const t = item.text;
+    let score = 0;
+    if (t === q) score += 200;
+    if (t.startsWith(q)) score += 120;
+    if (t.includes(q)) score += 60;
+    for (const w of words){ if (t.includes(w)) score += 10; }
+    if (score>0) out.push({r:item.r, score});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out.slice(0,limit).map(x=>x.r);
+}
+
+function openPopupFor(r){
+  let found=null;
+  cluster.eachLayer(l=>{
+    const p=l.getLatLng();
+    if (Math.abs(p.lat-r.lat)<1e-6 && Math.abs(p.lng-r.lng)<1e-6) found=l;
+  });
+  map.setView([r.lat,r.lng], 12);
+  if(found) found.openPopup();
+}
+
+let suggestEl=null, activeIndex=-1, lastSuggestRows=[];
+function setupSuggest(){
+  const qEl = Q('#q');
+  const wrap = qEl.parentElement;
+  wrap.style.position = 'relative';
+  suggestEl = document.createElement('div');
+  suggestEl.id = 'suggest';
+  Object.assign(suggestEl.style, {
+    position:'absolute', top:(qEl.offsetTop+qEl.offsetHeight+6)+'px',
+    left:qEl.offsetLeft+'px', right:0, background:'#0a1c3b',
+    border:'1px solid #284a91', borderRadius:'8px', display:'none',
+    maxHeight:'260px', overflowY:'auto', zIndex:1000
+  });
+  wrap.appendChild(suggestEl);
+
+  qEl.addEventListener('input', onSearchInput);
+  qEl.addEventListener('keydown', onSearchKey);
+  qEl.addEventListener('blur', ()=> setTimeout(()=>suggestEl.style.display='none',150));
+}
+function onSearchInput(e){
+  const q = e.target.value;
+  applyFilters(true); // mantiene filtro
+  lastSuggestRows = searchTop(q, 8);
+  renderSuggest(lastSuggestRows);
+}
+function onSearchKey(e){
+  if(suggestEl.style.display!=='block') return;
+  const n = suggestEl.children.length;
+  if (e.key==='ArrowDown'){ e.preventDefault(); activeIndex=(activeIndex+1)%n; highlight(); }
+  else if (e.key==='ArrowUp'){ e.preventDefault(); activeIndex=(activeIndex-1+n)%n; highlight(); }
+  else if (e.key==='Enter'){
+    e.preventDefault();
+    const target = activeIndex>=0 ? lastSuggestRows[activeIndex] : lastSuggestRows[0];
+    if(target){ suggestEl.style.display='none'; openPopupFor(target); }
+  }
+}
+function renderSuggest(rows){
+  suggestEl.innerHTML='';
+  activeIndex=-1;
+  if(!rows.length){ suggestEl.style.display='none'; return; }
+  rows.forEach((r,i)=>{
+    const div=document.createElement('div');
+    div.textContent = `${r.campos.COD_DISTRI||''} — ${r.campos.NOM_DISTRI||''} (${r.provincia}/${r.canton})`;
+    Object.assign(div.style,{padding:'8px 10px',cursor:'pointer'});
+    div.onmouseenter=()=>{ activeIndex=i; highlight(); };
+    div.onclick=()=>{ suggestEl.style.display='none'; openPopupFor(r); };
+    suggestEl.appendChild(div);
+  });
+  suggestEl.style.display='block';
+}
+function highlight(){
+  Array.from(suggestEl.children).forEach((el,i)=>{
+    el.style.background = (i===activeIndex) ? '#143166' : 'transparent';
+  });
 }
 
 /* ===== UI helpers ===== */
@@ -257,7 +348,7 @@ function render(){
 }
 
 function applyFilters(updateUrl=false){
-  const q  = Q('#q').value.trim().toLowerCase();
+  const q  = Q('#q').value.trim();
   const p  = Q('#provSel').value;
   const c  = Q('#cantonSel').value;
   filtered = records.filter(r=>{
@@ -265,8 +356,9 @@ function applyFilters(updateUrl=false){
     if(c && r.canton!==c) return false;
     if(selectedCats.size>0 && !selectedCats.has(r.complement)) return false;
     if(q){
-      const s = `${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''}`.toLowerCase();
-      if(!s.includes(q)) return false;
+      // búsqueda ampliada y acento-insensible
+      const haystack = norm(`${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''} ${r.provincia||''} ${r.canton||''}`);
+      if (!haystack.includes(norm(q))) return false;
     }
     return true;
   });
@@ -340,6 +432,10 @@ async function init(){
     } else {
       records = await loadCSV();
     }
+
+    // (Paso 5) índice de búsqueda + autocomplete
+    buildSearchIndex();
+    setupSuggest();
 
     makeChips();
     buildCombos();

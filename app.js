@@ -1,12 +1,20 @@
 /* =================== CONFIG =================== */
 const PATHS = {
   csv: 'data/distritos.csv',
-  provincias: 'data/provincias.topo.json', // preferido (liviano)
-  provinciasFallback: 'data/provincias.geojson', // por si no hay topo
-  logo: 'data/logo.png' // opcional
+  provincias: 'data/provincias.topo.json',      // preferido (liviano)
+  provinciasFallback: 'data/provincias.geojson',// fallback si no hay topo
+  logo: 'data/logo.png'                         // opcional
 };
 // Fuerza contador fijo (ej. 140). null = dinámico
 const FORCE_COUNT = null;
+
+// Activa lectura desde Supabase (si index.html incluye el SDK UMD)
+const USE_SUPABASE = true;
+// Pon aquí tus credenciales públicas de Supabase
+const SUPABASE = {
+  url: 'https://esm.sh/@supabase/supabase-js@2', // ← reemplaza
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs'                  // ← reemplaza
+};
 
 /* ===== Utils ===== */
 const Q = sel => document.querySelector(sel);
@@ -20,8 +28,16 @@ function toFloat(v){
   return Number.isFinite(n) ? n : null;
 }
 function colorFor(cat){
-  const t={"MINEDUC":"#2563eb","SENECYT":"#10b981","SENECYT - ZONA DEPORTE":"#0ea5e9","ZONA DEPORTE":"#f59e0b","OT DEPORTE":"#ef4444","SIN ETIQUETA":"#6b7280"};
-  for (const k in t) if (cat && cat.toUpperCase().indexOf(k)>=0) return t[k]; return "#2563eb";
+  const t={
+    "MINEDUC":"#2563eb",
+    "SENECYT":"#10b981",
+    "SENECYT - ZONA DEPORTE":"#0ea5e9",
+    "ZONA DEPORTE":"#f59e0b",
+    "OT DEPORTE":"#ef4444",
+    "SIN ETIQUETA":"#6b7280"
+  };
+  for (const k in t) if (cat && cat.toUpperCase().indexOf(k)>=0) return t[k];
+  return "#2563eb";
 }
 function popupHTML(c){ 
   const row=(l,v)=>!v||String(v).trim()===''?'':`<div style="padding:6px;border-left:3px solid #3a5899"><b>${l}:</b> <span style="opacity:.9">${v}</span></div>`;
@@ -47,36 +63,45 @@ let provs = [];         // provincias únicas
 let cantByProv = {};    // cantones por provincia
 let selectedCats = new Set();
 let provLayer=null;
+let supabaseClient = null;
 
+/* ===== Mapa ===== */
 const map = L.map('map', { zoomControl:true }).setView([-1.8312, -78.1834], 6);
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap'}).addTo(map);
-const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri'});
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri' });
 L.control.layers({"Mapa Estándar":osm,"Vista Satelital":sat},{},{collapsed:false}).addTo(map);
-const cluster = L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius:60, spiderfyOnMaxZoom:true, showCoverageOnHover:false, disableClusteringAtZoom:15 });
+const cluster = L.markerClusterGroup({
+  chunkedLoading:true,
+  maxClusterRadius:60,
+  spiderfyOnMaxZoom:true,
+  showCoverageOnHover:false,
+  disableClusteringAtZoom:15
+});
 map.addLayer(cluster);
 
-/* ===== Carga de Provincias (TopoJSON con fallback a GeoJSON) ===== */
+/* ===== Provincias (TopoJSON con fallback a GeoJSON) ===== */
 async function loadProvincias(){
   try{
     const r = await fetch(PATHS.provincias);
     if(!r.ok) throw new Error('Topo no disponible');
     const topo = await r.json();
-    const gj = topo.type === 'Topology'
-      ? topojson.feature(topo, Object.values(topo.objects)[0])
-      : topo; // por si subes un geojson con ese nombre
+    let gj = topo;
+    if (topo && topo.type === 'Topology' && typeof topojson !== 'undefined') {
+      const first = Object.values(topo.objects)[0];
+      gj = topojson.feature(topo, first);
+    }
     provLayer = L.geoJSON(gj,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
   }catch(e){
-    // Fallback a GeoJSON tradicional
     try{
       const r2 = await fetch(PATHS.provinciasFallback);
-      if(!r2.ok) return; // silencioso si no hay fallback
+      if(!r2.ok) return;
       const gj2 = await r2.json();
       provLayer = L.geoJSON(gj2,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
-    }catch(err){ /* opcional: console.warn('Sin provincias'); */ }
+    }catch(err){ /* sin provincias */ }
   }
 }
 
-/* ===== Carga de CSV ===== */
+/* ===== CSV (fallback) ===== */
 async function loadCSV(){
   const res = await fetch(PATHS.csv);
   if(!res.ok) throw new Error('No se pudo descargar CSV '+PATHS.csv);
@@ -84,7 +109,6 @@ async function loadCSV(){
   const parsed = Papa.parse(txt, { header:true, skipEmptyLines:true });
   const rows = parsed.data;
 
-  // Normalización mínima
   const want = k => Object.keys(rows[0]||{}).find(x=>x && x.toLowerCase().trim()==k.toLowerCase());
   const col = {
     cod: want('COD_DISTRI') || want('cod_distri') || want('codigo'),
@@ -121,10 +145,55 @@ async function loadCSV(){
   return recs;
 }
 
+/* ===== Supabase ===== */
+function initSupabase(){
+  // Requiere incluir en index.html:
+  // <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  if (!USE_SUPABASE) return null;
+  if (!window.supabase) return null;
+  if (!SUPABASE.url || !SUPABASE.anonKey) return null;
+  try{
+    return window.supabase.createClient(SUPABASE.url, SUPABASE.anonKey);
+  }catch(e){
+    console.warn('No se pudo crear cliente de Supabase:', e);
+    return null;
+  }
+}
+
+async function loadFromSupabase(client){
+  const cols = [
+    'COD_DISTRI','NOM_DISTRI','DIRECCION',
+    'DPA_PARROQ','DPA_DESPAR','DPA_CANTON','DPA_DESCAN',
+    'DPA_PROVIN','DPA_DESPRO','ZONA','NMT_25','COMPLEMENT',
+    'Capital_Pr','Latitud','Longitud'
+  ].join(',');
+
+  const { data, error } = await client.from('distritos').select(cols);
+  if (error) throw error;
+
+  return data.map(r => ({
+    lat: Number(r.Latitud),
+    lng: Number(r.Longitud),
+    provincia: r.DPA_DESPRO || '',
+    canton: r.DPA_DESCAN || '',
+    complement: (r.COMPLEMENT || '').toString() || 'SIN ETIQUETA',
+    campos: { ...r }
+  })).filter(d =>
+    Number.isFinite(d.lat) && Number.isFinite(d.lng) &&
+    d.lat>=-5.8 && d.lat<=2.2 && d.lng>=-92.5 && d.lng<=-74.0
+  );
+}
+
+/* ===== UI helpers ===== */
 function makeChips(){
   const c = {};
-  for(const r of records){ const k=r.complement&&r.complement.trim()?r.complement:'SIN ETIQUETA'; c[k]=(c[k]||0)+1; }
-  chips = Object.entries(c).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0])).map(([nombre,count])=>({nombre,count}));
+  for(const r of records){
+    const k=r.complement&&r.complement.trim()?r.complement:'SIN ETIQUETA';
+    c[k]=(c[k]||0)+1;
+  }
+  chips = Object.entries(c)
+    .sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]))
+    .map(([nombre,count])=>({nombre,count}));
   const box = Q('#chips'); box.innerHTML='';
   chips.forEach(ch=>{
     const el=document.createElement('button'); el.className='chip'; el.textContent=`${ch.nombre} (${ch.count})`;
@@ -138,11 +207,10 @@ function makeChips(){
 }
 
 function buildCombos(){
-  // provincias
   const setProv = new Set(records.map(r=>r.provincia).filter(Boolean));
   provs = Array.from(setProv).sort((a,b)=>a.localeCompare(b));
-  const provSel = Q('#provSel'); provSel.innerHTML = '<option value="">Todas</option>' + provs.map(p=>`<option>${p}</option>`).join('');
-  // cantones por provincia
+  const provSel = Q('#provSel');
+  provSel.innerHTML = '<option value="">Todas</option>' + provs.map(p=>`<option>${p}</option>`).join('');
   cantByProv = {};
   for(const r of records){
     const p = r.provincia||''; const c = r.canton||'';
@@ -208,12 +276,11 @@ function loadFromURL(){
   const cats = (u.searchParams.get('cats')||'').split('|').filter(Boolean);
   Q('#q').value = q;
   if(p) Q('#provSel').value = p;
-  if(p){ // cargar cantones para provincia
+  if(p){
     const cants = Array.from((cantByProv[p]||new Set())).sort((a,b)=>a.localeCompare(b));
     Q('#cantonSel').innerHTML = '<option value="">Todos</option>' + cants.map(x=>`<option>${x}</option>`).join('');
     if(c) Q('#cantonSel').value = c;
   }
-  // activar chips
   const box = Q('#chips');
   cats.forEach(cat=>{
     selectedCats.add(cat);
@@ -239,16 +306,28 @@ function exportCSV(){
   a.click();
 }
 
+/* ===== Arranque ===== */
 async function init(){
   try{
-    // Logo opcional (si alguna vez lo muestras)
-    fetch(PATHS.logo).then(r=>{ /* noop */ });
+    // Logo opcional
+    fetch(PATHS.logo).catch(()=>{});
 
     // Provincias (TopoJSON con fallback)
     await loadProvincias();
 
-    // CSV distritos
-    records = await loadCSV();
+    // Supabase o CSV
+    supabaseClient = initSupabase();
+    if (supabaseClient) {
+      try{
+        records = await loadFromSupabase(supabaseClient);
+      }catch(err){
+        console.warn('Fallo Supabase, usando CSV:', err);
+        records = await loadCSV();
+      }
+    } else {
+      records = await loadCSV();
+    }
+
     makeChips();
     buildCombos();
     loadFromURL();
@@ -262,14 +341,12 @@ async function init(){
     };
     Q('#btnExport').onclick = exportCSV;
 
-    // Toggle provincias
     Q('#btnProv').onclick = ()=>{ 
       if(!provLayer) return; 
       if(map.hasLayer(provLayer)){ map.removeLayer(provLayer); Q('#btnProv').textContent='Provincias: OFF'; }
       else { provLayer.addTo(map); Q('#btnProv').textContent='Provincias: ON'; }
     };
 
-    // centrar al promedio
     if(records.length){
       const lat = records.reduce((a,b)=>a+b.lat,0)/records.length;
       const lng = records.reduce((a,b)=>a+b.lng,0)/records.length;
@@ -280,9 +357,10 @@ async function init(){
   }catch(e){
     console.error(e);
     Q('#counter').innerHTML = "❌ Error cargando datos";
-    alert("No se pudo leer data/distritos.csv o provincias.");
+    alert("No se pudieron cargar los datos (Supabase/CSV) o provincias.");
   }finally{
-    document.getElementById('loading').style.display='none';
+    const loading = document.getElementById('loading');
+    if (loading) loading.style.display='none';
   }
 }
 init();

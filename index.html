@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa dinámico — Distritos Educativos (EC)</title>
+
+<!-- Leaflet + MarkerCluster -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+
+<!-- PapaParse para leer CSV -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+  :root{
+    --bg:#07162f; --card:#0d2249; --muted:#99a2b1; --grad1:#5b7cff; --grad2:#7a4ad8;
+    --chip:#fff; --chip-border:#e5e7eb; --ok:#10b981; --accent:#5b7cff;
+  }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:#eaf0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  .wrap{max-width:1280px;margin:0 auto;padding:18px}
+  .header{background:linear-gradient(90deg,var(--grad1),var(--grad2));border-radius:16px;padding:18px 22px;margin-bottom:12px;box-shadow:0 10px 24px rgba(0,0,0,.14)}
+  .header h1{margin:0;font-size:24px}
+  .counter{opacity:.95;margin-top:6px}
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:12px}
+  .card{background:var(--card);border-radius:16px;padding:14px;border:1px solid #143166;box-shadow:0 6px 18px rgba(0,0,0,.2)}
+  #map{height:72vh;width:100%;border-radius:14px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .label{font-weight:700;margin:4px 0 6px 0;color:#dbe3ff}
+  .input, select{width:100%;padding:10px 12px;border-radius:12px;border:2px solid #1b386f;background:#0a1c3b;color:#eaf0ff}
+  .chip{display:inline-block;margin:6px 6px 0 0;padding:8px 12px;border-radius:999px;border:2px solid var(--chip-border);cursor:pointer;font-weight:700;font-size:13px;background:var(--chip);color:#111}
+  .chip.active{background:linear-gradient(135deg,var(--grad1),var(--grad2));border-color:var(--grad2);color:#fff}
+  .btn{padding:9px 12px;border-radius:12px;border:2px solid #284a91;background:#0a1c3b;color:#eaf0ff;cursor:pointer;font-weight:700}
+  .btn.secondary{background:#fff;color:#111;border-color:#e5e7eb}
+  .stat{display:flex;gap:10px;margin:10px 0 6px}
+  .pill{background:#0a1c3b;border:2px solid #284a91;border-radius:12px;padding:8px 10px}
+  .muted{color:var(--muted);font-size:12px}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .dot{display:inline-block;width:12px;height:12px;border-radius:999px;margin-right:6px;border:2px solid #fff}
+  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0006;color:#fff;font-weight:800;z-index:999}
+</style>
+</head>
+<body>
+<div id="loading" class="loading">Cargando datos…</div>
+
+<div class="wrap">
+  <div class="header">
+    <h1>Nuevo Modelo Territorial — MINEDEC 2025</h1>
+    <div id="counter" class="counter"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">🔎 Búsqueda</div>
+      <input id="q" class="input" type="search" placeholder="Buscar por código o nombre de distrito…">
+
+      <div class="row" style="margin-top:10px">
+        <div>
+          <div class="label">🏞️ Provincia</div>
+          <select id="provSel"><option value="">Todas</option></select>
+        </div>
+        <div>
+          <div class="label">🏙️ Cantón</div>
+          <select id="cantonSel"><option value="">Todos</option></select>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="label">🏷️ Filtro por <code>COMPLEMENT</code></div>
+        <div id="chips"></div>
+      </div>
+
+      <div class="stat">
+        <div class="pill"><b>Registros:</b> <span id="nTotal">—</span></div>
+        <div class="pill"><b>Filtrados:</b> <span id="nFilt">—</span></div>
+      </div>
+
+      <div class="legend">
+        <div><span class="dot" style="background:#2563eb"></span> MINEDUC</div>
+        <div><span class="dot" style="background:#10b981"></span> SENECYT</div>
+        <div><span class="dot" style="background:#0ea5e9"></span> SENECYT - ZONA DEPORTE</div>
+        <div><span class="dot" style="background:#f59e0b"></span> ZONA DEPORTE</div>
+        <div><span class="dot" style="background:#ef4444"></span> OT DEPORTE</div>
+        <div><span class="dot" style="background:#6b7280"></span> SIN ETIQUETA</div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btnAll" class="btn secondary">Quitar filtros</button>
+        <button id="btnProv" class="btn">Provincias: ON</button>
+        <button id="btnExport" class="btn">Exportar CSV (filtrado)</button>
+      </div>
+
+      <div style="margin-top:10px" class="muted">
+        <b>Fuentes:</b> data/distritos.csv (obligatorio), data/provincias.geojson (opcional), data/logo.png (opcional)
+      </div>
+    </div>
+
+    <div class="card"><div id="map"></div></div>
+  </div>
+</div>
+
+<!-- Lógica -->
+<script src="app.js"></script>
+</body>
+</html>

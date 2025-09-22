@@ -1,8 +1,9 @@
 /* =================== CONFIG =================== */
 const PATHS = {
   csv: 'data/distritos.csv',
-  provincias: 'data/provincias.geojson', // opcional
-  logo: 'data/logo.png'                  // opcional
+  provincias: 'data/provincias.topo.json', // preferido (liviano)
+  provinciasFallback: 'data/provincias.geojson', // por si no hay topo
+  logo: 'data/logo.png' // opcional
 };
 // Fuerza contador fijo (ej. 140). null = dinámico
 const FORCE_COUNT = null;
@@ -54,7 +55,28 @@ L.control.layers({"Mapa Estándar":osm,"Vista Satelital":sat},{},{collapsed:fals
 const cluster = L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius:60, spiderfyOnMaxZoom:true, showCoverageOnHover:false, disableClusteringAtZoom:15 });
 map.addLayer(cluster);
 
-/* ===== Carga de datos ===== */
+/* ===== Carga de Provincias (TopoJSON con fallback a GeoJSON) ===== */
+async function loadProvincias(){
+  try{
+    const r = await fetch(PATHS.provincias);
+    if(!r.ok) throw new Error('Topo no disponible');
+    const topo = await r.json();
+    const gj = topo.type === 'Topology'
+      ? topojson.feature(topo, Object.values(topo.objects)[0])
+      : topo; // por si subes un geojson con ese nombre
+    provLayer = L.geoJSON(gj,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
+  }catch(e){
+    // Fallback a GeoJSON tradicional
+    try{
+      const r2 = await fetch(PATHS.provinciasFallback);
+      if(!r2.ok) return; // silencioso si no hay fallback
+      const gj2 = await r2.json();
+      provLayer = L.geoJSON(gj2,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
+    }catch(err){ /* opcional: console.warn('Sin provincias'); */ }
+  }
+}
+
+/* ===== Carga de CSV ===== */
 async function loadCSV(){
   const res = await fetch(PATHS.csv);
   if(!res.ok) throw new Error('No se pudo descargar CSV '+PATHS.csv);
@@ -63,7 +85,7 @@ async function loadCSV(){
   const rows = parsed.data;
 
   // Normalización mínima
-  const want = k => Object.keys(rows[0]||{}).find(x=>x.toLowerCase().trim()==k.toLowerCase());
+  const want = k => Object.keys(rows[0]||{}).find(x=>x && x.toLowerCase().trim()==k.toLowerCase());
   const col = {
     cod: want('COD_DISTRI') || want('cod_distri') || want('codigo'),
     nom: want('NOM_DISTRI') || want('nom_distri') || want('distrito'),
@@ -219,12 +241,13 @@ function exportCSV(){
 
 async function init(){
   try{
-    // Logo y provincias (opcionales)
-    fetch(PATHS.logo).then(r=>{ if(r.ok){ /* podrías mostrar logo si quisieras */ }});
-    fetch(PATHS.provincias).then(r=> r.ok ? r.json() : Promise.reject('no prov')).then(gj=>{
-      provLayer = L.geoJSON(gj,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
-    }).catch(()=>{});
+    // Logo opcional (si alguna vez lo muestras)
+    fetch(PATHS.logo).then(r=>{ /* noop */ });
 
+    // Provincias (TopoJSON con fallback)
+    await loadProvincias();
+
+    // CSV distritos
     records = await loadCSV();
     makeChips();
     buildCombos();
@@ -257,9 +280,9 @@ async function init(){
   }catch(e){
     console.error(e);
     Q('#counter').innerHTML = "❌ Error cargando datos";
-    alert("No se pudo leer data/distritos.csv. Verifica el archivo y sus columnas Latitud/Longitud.");
+    alert("No se pudo leer data/distritos.csv o provincias.");
   }finally{
-    Q('#loading').style.display='none';
+    document.getElementById('loading').style.display='none';
   }
 }
 init();

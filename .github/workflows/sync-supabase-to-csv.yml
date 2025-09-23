@@ -1,57 +1,72 @@
 name: Sync Supabase -> CSV
-
 on:
   schedule:
-    - cron: "0 6 * * *"   # todos los días 06:00 UTC
+    - cron: "0 6 * * *"   # todos los días 06:00 UTC (CORREGIDO)
   workflow_dispatch:       # permitir ejecución manual
-
 jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
       contents: write      # necesario para hacer commit/push
-
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Install jq
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-
       - name: Fetch from Supabase and build CSV
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p data
-
-          # Descarga JSON desde Supabase (ajusta la lista de columnas si cambias tu tabla)
+          
+          echo "Fetching data from Supabase..."
+          # Usar SERVICE_ROLE_KEY para acceso completo
           curl -s "${SUPABASE_URL}/rest/v1/distritos?select=cod_distri,nom_distri,direccion,dpa_parroq,dpa_despar,dpa_canton,dpa_descan,dpa_provin,dpa_despro,zona,nmt_25,complement,capital_pr,latitud,longitud&limit=10000" \
-            -H "apikey: ${SUPABASE_ANON_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Accept: application/json" \
             > data/distritos.json
-
+            
+          # Verificar que el JSON no esté vacío
+          if [ ! -s data/distritos.json ]; then
+            echo "Error: JSON file is empty"
+            exit 1
+          fi
+          
+          echo "Converting JSON to CSV..."
           # Convierte JSON → CSV (primera fila = encabezados)
           jq -r '(.[0] | keys_unsorted) as $k | $k, (.[] | [.[ $k[] ]]) | @csv' \
             data/distritos.json > data/distritos.csv
-
+            
+          # Verificar que el CSV se generó correctamente
+          if [ ! -s data/distritos.csv ]; then
+            echo "Error: CSV file is empty"
+            exit 1
+          fi
+          
+          echo "CSV generated successfully:"
+          head -2 data/distritos.csv
+          echo "Total lines: $(wc -l < data/distritos.csv)"
+          
           rm -f data/distritos.json
-
+          
       - name: Commit CSV if changed
         shell: bash
         run: |
           if git diff --quiet -- data/distritos.csv; then
-            echo "No changes"
+            echo "No changes in CSV file"
           else
+            echo "Changes detected, committing..."
             git config user.name  "github-actions"
             git config user.email "actions@github.com"
             git add data/distritos.csv
-            git commit -m "Sync CSV from Supabase"
+            git commit -m "Auto-sync: Update CSV from Supabase [$(date +'%Y-%m-%d %H:%M:%S UTC')]"
             git push
+            echo "CSV updated and pushed successfully"
           fi

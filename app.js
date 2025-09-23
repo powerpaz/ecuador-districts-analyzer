@@ -1,11 +1,8 @@
 /* =================== CONFIG =================== */
 const PATHS = {
   csv: 'data/distritos.csv',
-  // ← EXISTE en tu repo (ver /data)
-  provincias: 'data/provincias.json',
-  // Fallback por si subes un GeoJSON separado
-  provinciasFallback: 'data/provincias.geojson',
-  // tu index.html ya carga logo.png desde raíz
+  provincias: 'data/provincias.json',        // Topology (TopoJSON)
+  provinciasFallback: 'data/provincias.geojson', // GeoJSON
   logo: 'logo.png'
 };
 // Fuerza contador fijo (ej. 140). null = dinámico
@@ -56,7 +53,6 @@ function popupHTML(c){
       ${row("Longitud",c.Longitud)}${row("Latitud",c.Latitud)}
     </div></div>`;
 }
-// Búsqueda normalizada
 function norm(s){ return (s ?? '').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
 
 /* ===== Estado global ===== */
@@ -71,7 +67,7 @@ let supabaseClient = null;
 let SEARCH = { index: [] };
 
 /* ===== Mapa ===== */
-const map = L.map('map', { zoomControl:true }).setView([-1.8312, -78.1834], 6);
+const map = L.map('map', { zoomControl:true, preferCanvas:true }).setView([-1.8312, -78.1834], 6);
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap'}).addTo(map);
 const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri' });
 L.control.layers({"Mapa Estándar":osm,"Vista Satelital":sat},{},{collapsed:false}).addTo(map);
@@ -87,7 +83,7 @@ map.addLayer(cluster);
 /* ===== Provincias (TopoJSON o GeoJSON con fallback) ===== */
 async function loadProvincias(){
   async function tryLoad(url){
-    const r = await fetch(url);
+    const r = await fetch(url, {cache:'no-cache'});
     if(!r.ok) throw new Error('No encontrado: '+url);
     const j = await r.json();
     if (j && j.type === 'Topology' && typeof topojson !== 'undefined') {
@@ -109,7 +105,7 @@ async function loadProvincias(){
 
 /* ===== CSV (fallback) ===== */
 async function loadCSV(){
-  const res = await fetch(PATHS.csv);
+  const res = await fetch(PATHS.csv, {cache:'no-cache'});
   if(!res.ok) throw new Error('No se pudo descargar CSV '+PATHS.csv);
   const txt = await res.text();
   const parsed = Papa.parse(txt, { header:true, skipEmptyLines:true });
@@ -227,15 +223,7 @@ let suggestEl=null, activeIndex=-1, lastSuggestRows=[];
 function setupSuggest(){
   const qEl = Q('#q'); const wrap = qEl.parentElement;
   wrap.style.position = 'relative';
-  suggestEl = document.createElement('div');
-  suggestEl.id = 'suggest';
-  Object.assign(suggestEl.style, {
-    position:'absolute', top:(qEl.offsetTop+qEl.offsetHeight+6)+'px',
-    left:qEl.offsetLeft+'px', right:0, background:'#0a1c3b',
-    border:'1px solid #284a91', borderRadius:'8px', display:'none',
-    maxHeight:'260px', overflowY:'auto', zIndex:1000
-  });
-  wrap.appendChild(suggestEl);
+  suggestEl = Q('#suggest');
   qEl.addEventListener('input', onSearchInput);
   qEl.addEventListener('keydown', onSearchKey);
   qEl.addEventListener('blur', ()=> setTimeout(()=>suggestEl.style.display='none',150));
@@ -261,200 +249,4 @@ function renderSuggest(rows){
   suggestEl.innerHTML=''; activeIndex=-1;
   if(!rows.length){ suggestEl.style.display='none'; return; }
   rows.forEach((r,i)=>{
-    const div=document.createElement('div');
-    div.textContent = `${r.campos.COD_DISTRI||''} — ${r.campos.NOM_DISTRI||''} (${r.provincia}/${r.canton})`;
-    Object.assign(div.style,{padding:'8px 10px',cursor:'pointer'});
-    div.onmouseenter=()=>{ activeIndex=i; highlight(); };
-    div.onclick=()=>{ suggestEl.style.display='none'; openPopupFor(r); };
-    suggestEl.appendChild(div);
-  });
-  suggestEl.style.display='block';
-}
-function highlight(){
-  Array.from(suggestEl.children).forEach((el,i)=>{
-    el.style.background = (i===activeIndex) ? '#143166' : 'transparent';
-  });
-}
-
-/* ===== UI helpers ===== */
-function makeChips(){
-  const c = {};
-  for(const r of records){
-    const k=r.complement&&r.complement.trim()?r.complement:'SIN ETIQUETA';
-    c[k]=(c[k]||0)+1;
-  }
-  chips = Object.entries(c)
-    .sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]))
-    .map(([nombre,count])=>({nombre,count}));
-  const box = Q('#chips'); box.innerHTML='';
-  chips.forEach(ch=>{
-    const el=document.createElement('button'); el.className='chip'; el.textContent=`${ch.nombre} (${ch.count})`;
-    el.onclick=()=>{ 
-      if(el.classList.contains('active')){el.classList.remove('active');selectedCats.delete(ch.nombre);}
-      else{el.classList.add('active');selectedCats.add(ch.nombre);}
-      applyFilters(true);
-    };
-    box.appendChild(el);
-  });
-}
-function buildCombos(){
-  const setProv = new Set(records.map(r=>r.provincia).filter(Boolean));
-  provs = Array.from(setProv).sort((a,b)=>a.localeCompare(b));
-  const provSel = Q('#provSel');
-  provSel.innerHTML = '<option value="">Todas</option>' + provs.map(p=>`<option>${p}</option>`).join('');
-  cantByProv = {};
-  for(const r of records){
-    const p = r.provincia||''; const c = r.canton||'';
-    cantByProv[p] = cantByProv[p] || new Set();
-    if(c) cantByProv[p].add(c);
-  }
-  provSel.onchange = ()=>{
-    const p = provSel.value;
-    const cantSel = Q('#cantonSel'); 
-    const cants = Array.from((cantByProv[p]||new Set())).sort((a,b)=>a.localeCompare(b));
-    cantSel.innerHTML = '<option value="">Todos</option>' + cants.map(c=>`<option>${c}</option>`).join('');
-    applyFilters(true);
-  };
-  Q('#cantonSel').onchange = ()=> applyFilters(true);
-}
-function markerFor(r){
-  const m = L.circleMarker([r.lat,r.lng],{radius:8,fillColor:colorFor(r.complement),color:'#fff',weight:2,fillOpacity:.95});
-  m.bindPopup(popupHTML(r.campos),{maxWidth:560,autoPan:false});
-  m.bindTooltip(`${r.campos.COD_DISTRI||""}`,{permanent:false,direction:'top',opacity:.85});
-  m.on('click', ()=>{ if (window.showDistritoDetails) window.showDistritoDetails(r.campos); });
-  return m;
-}
-function render(){
-  cluster.clearLayers();
-  filtered.forEach(r=> cluster.addLayer(markerFor(r)));
-  const nTotal = (FORCE_COUNT ?? records.length);
-  Q('#nTotal').textContent = nTotal.toLocaleString();
-  Q('#nFilt').textContent  = filtered.length.toLocaleString();
-  Q('#counter').innerHTML  = `${nTotal} distritos • filtros activos: ${filtered.length} visibles`;
-  if (window.updateDashboard) window.updateDashboard(records, filtered);
-}
-function applyFilters(updateUrl=false){
-  const q  = Q('#q').value.trim();
-  const p  = Q('#provSel').value;
-  const c  = Q('#cantonSel').value;
-  filtered = records.filter(r=>{
-    if(p && r.provincia!==p) return false;
-    if(c && r.canton!==c) return false;
-    if(selectedCats.size>0 && !selectedCats.has(r.complement)) return false;
-    if(q){
-      const haystack = norm(`${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''} ${r.provincia||''} ${r.canton||''}`);
-      if (!haystack.includes(norm(q))) return false;
-    }
-    return true;
-  });
-  if(updateUrl){
-    const params = new URLSearchParams();
-    if(q) params.set('q', q);
-    if(p) params.set('prov', p);
-    if(c) params.set('canton', c);
-    if(selectedCats.size>0) params.set('cats', Array.from(selectedCats).join('|'));
-    history.replaceState(null,'','?'+params.toString());
-  }
-  render();
-}
-function loadFromURL(){
-  const u = new URL(location.href);
-  const q = u.searchParams.get('q')||'';
-  const p = u.searchParams.get('prov')||'';
-  const c = u.searchParams.get('canton')||'';
-  const cats = (u.searchParams.get('cats')||'').split('|').filter(Boolean);
-  Q('#q').value = q;
-  if(p) Q('#provSel').value = p;
-  if(p){
-    const cants = Array.from((cantByProv[p]||new Set())).sort((a,b)=>a.localeCompare(b));
-    Q('#cantonSel').innerHTML = '<option value="">Todos</option>' + cants.map(x=>`<option>${x}</option>`).join('');
-    if(c) Q('#cantonSel').value = c;
-  }
-  const box = Q('#chips');
-  cats.forEach(cat=>{
-    selectedCats.add(cat);
-    Array.from(box.children).forEach(b=>{ if(b.textContent.startsWith(cat+' ')) b.classList.add('active'); });
-  });
-}
-function exportCSV(){
-  if(!filtered.length){ alert('No hay registros filtrados para exportar.'); return; }
-  const cols = Object.keys(filtered[0].campos);
-  const lines = [cols.join(',')];
-  filtered.forEach(r=>{
-    const row = cols.map(k=>{
-      const v = (r.campos[k]??'').toString().replace(/"/g,'""');
-      return `"${v}"`;
-    }).join(',');
-    lines.push(row);
-  });
-  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'distritos_filtrados.csv';
-  a.click();
-}
-
-/* ===== Arranque ===== */
-async function init(){
-  try{
-    // Logo opcional
-    fetch(PATHS.logo).catch(()=>{});
-
-    // Provincias
-    await loadProvincias();
-
-    // Supabase o CSV
-    supabaseClient = initSupabase();
-    if (supabaseClient) {
-      try{
-        records = await loadFromSupabase(supabaseClient);
-      }catch(err){
-        console.warn('Fallo Supabase, usando CSV:', err);
-        records = await loadCSV();
-      }
-    } else {
-      records = await loadCSV();
-    }
-
-    if(!records.length) throw new Error('No se pudieron cargar datos');
-
-    // ÍNDICE búsqueda + UI
-    buildSearchIndex();
-    setupSuggest();
-    makeChips();
-    buildCombos();
-    loadFromURL();
-
-    Q('#q').addEventListener('input', ()=>applyFilters(true));
-    Q('#btnAll').onclick = ()=>{
-      Q('#q').value=''; Q('#provSel').value=''; Q('#cantonSel').innerHTML='<option value="">Todos</option>';
-      selectedCats.clear(); document.querySelectorAll('.chip.active').forEach(x=>x.classList.remove('active'));
-      history.replaceState(null,'',' ');
-      applyFilters(false);
-    };
-    Q('#btnExport').onclick = exportCSV;
-    Q('#btnProv').onclick = ()=>{ 
-      if(!provLayer) return; 
-      if(map.hasLayer(provLayer)){ map.removeLayer(provLayer); Q('#btnProv').textContent='Provincias: OFF'; }
-      else { provLayer.addTo(map); Q('#btnProv').textContent='Provincias: ON'; }
-    };
-
-    if(records.length){
-      const lat = records.reduce((a,b)=>a+b.lat,0)/records.length;
-      const lng = records.reduce((a,b)=>a+b.lng,0)/records.length;
-      map.setView([lat,lng], 6);
-    }
-    filtered = records.slice();
-    applyFilters(false);
-  }catch(e){
-    console.error(e);
-    Q('#counter').innerHTML = "❌ Error cargando datos";
-    alert("No se pudieron cargar los datos (Supabase/CSV) o provincias.");
-  }finally{
-    const loading = document.getElementById('loading');
-    if (loading) loading.style.display='none';
-  }
-}
-init();
-
-
+    const div=document.c

@@ -1,5 +1,6 @@
 /* =========================================================
    ECUADOR DISTRICTS ANALYZER — JS ROBUSTO PARA PAGES
+   (con popup minimal basado en columnas snake_case)
    ========================================================= */
 
 /* =================== CONFIG =================== */
@@ -62,10 +63,6 @@ function colorFor(cat) {
   for (const k in M) if ((cat || '').toUpperCase().includes(k)) return M[k];
   return '#6b7280';
 }
-function formatCoord(c) {
-  const n = Number(c);
-  return Number.isFinite(n) ? n.toFixed(6) : '—';
-}
 
 /* ============ ESTADO GLOBAL ============ */
 let records = []; // [{lat,lng,provincia,canton,complement,campos:{...}}]
@@ -79,65 +76,90 @@ let SEARCH = { index: [] };
 let map, cluster, provLayer;
 let DATA_SOURCE = 'desconocido';
 
-// ============ POPUP (solo columnas en minúsculas; fallback a MAYÚSCULAS) ============
-function markerFor(r){
-  const m = L.circleMarker([r.lat, r.lng],{
-    radius:8,
-    fillColor:colorFor(r.complement),
-    color:'#fff',
-    weight:2,
-    fillOpacity:.95
-  });
+/* ============ POPUP PERSONALIZADO (snake_case) ============ */
+/* Muestra SOLO estos campos (si existen):
+   cod_distri, nom_distri, direccion, dpa_parroq, dpa_despar,
+   dpa_canton, dpa_descan, dpa_provin, dpa_despro, zona, nmt_25,
+   complement, capital_pr
+   Fallback a MAYÚSCULAS cuando los datos vienen del CSV.
+*/
+function popupHTML(c) {
+  const cod = c.cod_distri ?? c.COD_DISTRI ?? '';
+  const nom = c.nom_distri ?? c.NOM_DISTRI ?? '';
+  const dir = c.direccion ?? c.DIRECCION ?? '';
+  const parCod = c.dpa_parroq ?? c.DPA_PARROQ ?? '';
+  const parNom = c.dpa_despar ?? c.DPA_DESPAR ?? '';
+  const canCod = c.dpa_canton ?? c.DPA_CANTON ?? '';
+  const canNom = c.dpa_descan ?? c.DPA_DESCAN ?? '';
+  const provCod = c.dpa_provin ?? c.DPA_PROVIN ?? '';
+  const provNom = c.dpa_despro ?? c.DPA_DESPRO ?? '';
+  const zon = c.zona ?? c.ZONA ?? '';
+  const nmt = c.nmt_25 ?? c.NMT_25 ?? '';
+  const comp = c.complement ?? c.COMPLEMENT ?? '';
+  const cap = c.capital_pr ?? c.Capital_Pr ?? '';
 
-  m.bindPopup(
-    popupHTML(r.campos),
-    {
-      className: 'nice-popup',         // <- aplica el CSS de arriba
-      minWidth: 320,
-      maxWidth: 520,
-      closeButton: true,
-      autoPan: true,                   // <- que el mapa se mueva para encuadrar
-      keepInView: true,                // <- no permitas que se “escape” del viewport
-      autoPanPadding: [40,40],         // <- márgenes generales
-      // amortigua la esquina sup. derecha donde está el control de capas
-      autoPanPaddingTopLeft: [40,80],
-      autoPanPaddingBottomRight: [60,40]
-    }
-  );
+  const row = (l, v) =>
+    v && String(v).trim() !== ''
+      ? `<div style="padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.08)">
+           <div style="font-size:.72rem;opacity:.75;letter-spacing:.04em">${l}</div>
+           <div style="font-weight:600">${v}</div>
+         </div>`
+      : '';
 
-  m.bindTooltip(`${r.campos.cod_distri || r.campos.COD_DISTRI || ''}`,{
-    permanent:false, direction:'top', opacity:.9
-  });
-
-  // Al abrir el popup, centra suavemente el punto
-  m.on('popupopen', (e)=>{
-    // usa flyTo para un centrado suave sin cambiar demasiado el zoom
-    map.flyTo(e.popup.getLatLng(), Math.max(map.getZoom(), 8), { duration: 0.5 });
-  });
-
-  // Click: muestra detalles si los tienes
-  m.on('click', ()=>{
-    if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
-  });
-
-  return m;
+  return `
+    <div style="width:340px;font-family:system-ui;">
+      <div style="background:linear-gradient(135deg,#1e3a8a,#374151);color:#fff;padding:12px;border-radius:12px 12px 0 0;">
+        <div style="font-weight:800">${cod || '—'}</div>
+        <div style="opacity:.9">${nom || ''}</div>
+      </div>
+      <div style="padding:12px;background:#0b132b;color:#e5e7eb;border-radius:0 0 12px 12px">
+        ${row('Dirección', dir)}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          ${row('Parroquia (código)', parCod)}
+          ${row('Parroquia', parNom)}
+          ${row('Cantón (código)', canCod)}
+          ${row('Cantón', canNom)}
+          ${row('Provincia (código)', provCod)}
+          ${row('Provincia', provNom)}
+          ${row('Zona', zon)}
+          ${row('NMT_25', nmt)}
+          ${row('Categoría', comp)}
+          ${row('Capital_Pr', cap)}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 /* ============ MAPA ============ */
 function initMap() {
   map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([-1.8312, -78.1834], 6);
 
-  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  // Capas base
+  const osmStandard = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap',
+    maxZoom: 19,
   }).addTo(map);
 
-  const sat = L.tileLayer(
+  const osmHumanitarian = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap, HOT',
+    maxZoom: 20,
+  });
+
+  const esriSat = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { attribution: '© Esri' },
   );
 
-  L.control.layers({ 'Mapa Base': osm, 'Vista Satelital': sat }, {}, { collapsed: false }).addTo(map);
+  L.control
+    .layers(
+      { 'Mapa Base': osmStandard, 'OSM Humanitario': osmHumanitarian, 'Vista Satelital': esriSat },
+      {},
+      { collapsed: false },
+    )
+    .addTo(map);
 
+  // Clúster
   cluster = L.markerClusterGroup({
     chunkedLoading: true,
     maxClusterRadius: 60,
@@ -184,16 +206,16 @@ function mapRecord(rec) {
   const item = {
     lat,
     lng,
-    provincia: rec.DPA_DESPRO ?? rec.provincia ?? rec.Provincia ?? '',
-    canton: rec.DPA_DESCAN ?? rec.canton ?? rec.Cantón ?? '',
+    provincia: rec.DPA_DESPRO ?? rec.dpa_despro ?? rec.provincia ?? '',
+    canton: rec.DPA_DESCAN ?? rec.dpa_descan ?? rec.canton ?? '',
     complement: (rec.COMPLEMENT ?? rec.complement ?? '').toString() || 'SIN ETIQUETA',
     campos: {
       ...rec,
+      // normalizamos por si luego el popup necesita fallback
       Latitud: lat,
       Longitud: lng,
-      COD_DISTRI:
-        rec.COD_DISTRI ?? rec.cod_distri ?? rec.codigo ?? rec.codigo_distrito ?? rec.cod ?? rec.cod_distrito ?? rec.Codigo ?? '',
-      NOM_DISTRI: rec.NOM_DISTRI ?? rec.nom_distri ?? rec.nombre ?? rec.nombre_distrito ?? rec.Nombre ?? '',
+      COD_DISTRI: rec.COD_DISTRI ?? rec.cod_distri ?? '',
+      NOM_DISTRI: rec.NOM_DISTRI ?? rec.nom_distri ?? '',
     },
   };
 
@@ -237,7 +259,7 @@ async function loadFromSupabase() {
       'complement as COMPLEMENT',
       'capital_pr as Capital_Pr',
       'latitud    as Latitud',
-      'longitud   as Longitud'
+      'longitud   as Longitud',
     ].join(',');
 
     const { data, error } = await client.from('distritos').select(cols);
@@ -266,12 +288,14 @@ async function loadFromCsv(url) {
 }
 
 async function loadData() {
+  // 1) Supabase
   const fromSb = await loadFromSupabase();
   if (fromSb?.length) {
     DATA_SOURCE = 'Supabase';
     return fromSb;
   }
 
+  // 2) CSV relativo
   try {
     const fromRel = await loadFromCsv(CONFIG.csvRelative);
     if (fromRel.length) {
@@ -279,10 +303,12 @@ async function loadData() {
       log(`CSV relativo OK: ${fromRel.length} registros`);
       return fromRel;
     }
+    warn('CSV relativo vacío; intento RAW…');
   } catch (e) {
     warn('CSV relativo falló:', e?.message || e);
   }
 
+  // 3) CSV absoluto RAW
   const fromAbs = await loadFromCsv(CONFIG.csvAbsolute);
   if (fromAbs.length) {
     DATA_SOURCE = 'CSV RAW';
@@ -473,7 +499,7 @@ function markerFor(r) {
     weight: 2,
     fillOpacity: 0.95,
   });
-  m.bindPopup(popupHTML(r.campos), { maxWidth: 560, autoPan: false });
+  m.bindPopup(popupHTML(r.campos), { maxWidth: 560, autoPan: true });
   m.bindTooltip(`${r.campos.COD_DISTRI || ''}`, { permanent: false, direction: 'top', opacity: 0.85 });
   m.on('click', () => {
     if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
@@ -491,9 +517,8 @@ function render() {
   if ($('#nFilt')) $('#nFilt').textContent = filtered.length.toLocaleString();
 
   const el = $('#counter');
-  if (el) {
+  if (el)
     el.innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles <span style="opacity:.7">(${DATA_SOURCE})</span>`;
-  }
 
   if (window.updateDashboard) window.updateDashboard(records, filtered);
 }

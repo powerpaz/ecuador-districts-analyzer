@@ -2,41 +2,44 @@ name: Sync Supabase -> CSV
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # diario 06:00 UTC
-  workflow_dispatch:
+    - cron: "0 6 * * *"   # todos los días 06:00 UTC
+  workflow_dispatch:      # permitir ejecuciones manuales
 
 permissions:
-  contents: write
+  contents: write         # necesario para hacer commit/push
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install jq
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
 
-      - name: Download from Supabase via REST
+      - name: Fetch from Supabase and build CSV
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p data
 
-          curl -s "${SUPABASE_URL}/rest/v1/distritos?select=cod_distri,nom_distri,direccion,dpa_parroq,dpa_despar,dpa_canton,dpa_descan,dpa_provin,dpa_despro,zona,nmt_25,complement,capital_pr,latitud,longitud&order=cod_distri.asc&limit=10000" \
+          # ⚠️ Usa los nombres REALES de tus columnas (minúsculas según tu tabla)
+          curl -sSf "${SUPABASE_URL}/rest/v1/distritos?select=cod_distri,nom_distri,direccion,dpa_parroq,dpa_despar,dpa_canton,dpa_descan,dpa_provin,dpa_despro,zona,nmt_25,complement,capital_pr,latitud,longitud&limit=10000" \
             -H "apikey: ${SUPABASE_ANON_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
-          > data/distritos.json
+            -H "Accept: application/json" \
+            > data/distritos.json
 
-          # JSON -> CSV con encabezados
-          jq -r '
-            (.[0] | keys_unsorted) as $h
-            | ($h | @csv),
-              (.[] | [.[ $h[] ]] | @csv)
-          ' data/distritos.json > data/distritos.csv
+          # Encabezados en orden estable para diffs limpios
+          jq -r '["cod_distri","nom_distri","direccion","dpa_parroq","dpa_despar","dpa_canton","dpa_descan","dpa_provin","dpa_despro","zona","nmt_25","complement","capital_pr","latitud","longitud"] as $k
+                 | $k, (.[] | [.[ $k[] ]]) | @csv' \
+            data/distritos.json > data/distritos.csv
 
           rm -f data/distritos.json
 
@@ -45,9 +48,10 @@ jobs:
           if git diff --quiet -- data/distritos.csv; then
             echo "No changes"
           else
-            git config user.name  "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config user.name  "github-actions"
+            git config user.email "actions@github.com"
             git add data/distritos.csv
             git commit -m "Sync CSV from Supabase"
             git push
           fi
+

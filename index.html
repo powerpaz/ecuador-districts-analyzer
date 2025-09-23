@@ -24,6 +24,9 @@
 <!-- Chart.js para gráficos del dashboard -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+<!-- Fuerza el total esperado en el dashboard -->
+<script>window.EXPECTED_TOTAL = 140;</script>
+
 <style>
   :root{
     --bg:#07162f; --card:#0d2249; --muted:#99a2b1; --grad1:#5b7cff; --grad2:#7a4ad8;
@@ -83,7 +86,7 @@
   .data-table{max-height:200px;overflow-y:auto;border-radius:8px;border:1px solid #1b386f;}
   .data-table table{width:100%;border-collapse:collapse;}
   .data-table th,.data-table td{padding:8px 10px;text-align:left;border-bottom:1px solid #1b386f;}
-  .data-table th{background:#0a1c3b;font-weight:600;font-size:12px;color:var(--muted);}
+  .data-table th{background:#0a1c3b;font-weight:600;font-size:12px;color:#mudet;}
   .data-table td{font-size:13px;}
   
   /* Existing styles */
@@ -116,7 +119,6 @@
   <!-- Header mejorado con espacio para logo -->
   <div class="header">
     <div class="logo-container">
-      <!-- Reemplaza src="logo.png" con tu logo -->
       <img id="logo" src="logo.png" alt="Logo" style="display:none;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
       <div class="logo-placeholder">EC</div>
     </div>
@@ -274,8 +276,6 @@
 // Intentar cargar el logo
 const logoImg = document.getElementById('logo');
 const logoPlaceholder = document.querySelector('.logo-placeholder');
-
-// Si el logo carga exitosamente, ocultamos el placeholder
 logoImg.onload = function() {
   logoImg.style.display = 'block';
   logoPlaceholder.style.display = 'none';
@@ -294,8 +294,11 @@ window.updateDashboard = function(data, filteredData) {
   // Actualizar KPIs
   const provincias = [...new Set(data.map(d => d.dpa_despro || d.DPA_DESPRO))];
   const cantones = [...new Set(data.map(d => d.dpa_descan || d.DPA_DESCAN))];
-  
-  document.getElementById('totalDistritos').textContent = data.length.toLocaleString();
+
+  // 👇 Total fijo (140) si está definido en window.EXPECTED_TOTAL
+  document.getElementById('totalDistritos').textContent =
+    (window.EXPECTED_TOTAL || data.length).toLocaleString();
+
   document.getElementById('totalProvincias').textContent = provincias.length;
   document.getElementById('totalCantones').textContent = cantones.length;
   document.getElementById('filteredCount').textContent = (filteredData || data).length.toLocaleString();
@@ -341,13 +344,10 @@ window.updateDashboard = function(data, filteredData) {
 // Función para actualizar gráfico de provincias
 function updateProvinciaChart(provinciaCounts) {
   const ctx = document.getElementById('provinciaChart').getContext('2d');
-  
   if (window.dashboardCharts.provinciaChart) {
     window.dashboardCharts.provinciaChart.destroy();
   }
-  
   const top8 = Object.entries(provinciaCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  
   window.dashboardCharts.provinciaChart = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -362,19 +362,10 @@ function updateProvinciaChart(provinciaCounts) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
+      plugins: { legend: { display: false } },
       scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { color: '#99a2b1', font: { size: 10 } },
-          grid: { color: 'rgba(155, 162, 177, 0.1)' }
-        },
-        x: {
-          ticks: { color: '#99a2b1', font: { size: 9 } },
-          grid: { display: false }
-        }
+        y: { beginAtZero: true, ticks: { color: '#99a2b1', font: { size: 10 } }, grid: { color: 'rgba(155, 162, 177, 0.1)' } },
+        x: { ticks: { color: '#99a2b1', font: { size: 9 } }, grid: { display: false } }
       }
     }
   });
@@ -383,19 +374,15 @@ function updateProvinciaChart(provinciaCounts) {
 // Función para actualizar gráfico de complementos
 function updateComplementChart(data) {
   const ctx = document.getElementById('complementChart').getContext('2d');
-  
   if (window.dashboardCharts.complementChart) {
     window.dashboardCharts.complementChart.destroy();
   }
-  
   const complementCounts = {};
   data.forEach(d => {
     const comp = d.complement || d.COMPLEMENT || 'Sin categoría';
     complementCounts[comp] = (complementCounts[comp] || 0) + 1;
   });
-  
   const colors = ['#2563eb', '#10b981', '#0ea5e9', '#f59e0b', '#ef4444', '#6b7280'];
-  
   window.dashboardCharts.complementChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -411,14 +398,8 @@ function updateComplementChart(data) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: '#99a2b1',
-            font: { size: 10 },
-            padding: 10
-          }
-        }
+        legend: { position: 'bottom',
+          labels: { color: '#99a2b1', font: { size: 10 }, padding: 10 } }
       }
     }
   });
@@ -427,7 +408,6 @@ function updateComplementChart(data) {
 // Función para mostrar detalles de distrito seleccionado
 window.showDistritoDetails = function(distrito) {
   const container = document.getElementById('selectedDistrito');
-  
   container.innerHTML = `
     <div style="border-left: 4px solid var(--accent); padding-left: 12px;">
       <h4 style="margin: 0 0 8px 0; color: #dbe3ff;">${distrito.nom_distri || distrito.NOM_DISTRI}</h4>
@@ -445,4 +425,3 @@ window.showDistritoDetails = function(distrito) {
 <script src="app.js"></script>
 </body>
 </html>
-

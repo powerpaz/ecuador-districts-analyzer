@@ -11,8 +11,8 @@ const FORCE_COUNT = null;
 // === Supabase (usa el SDK UMD que incluyes en index.html) ===
 const USE_SUPABASE = true;
 const SUPABASE = {
-  // ⚠️ Tu URL real del proyecto (Settings → API)
-  url: 'https://eunujfywdwipguopstru.supabase.co',
+  // ⚠️ URL CORREGIDA (faltaba una 'p')
+  url: 'https://eunujfywdwipguoptru.supabase.co',
   // ⚠️ Tu anon key pública (puede quedar en frontend)
   anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs'
 };
@@ -111,17 +111,19 @@ async function loadProvincias(){
       if(!r2.ok) return;
       const gj2 = await r2.json();
       provLayer = L.geoJSON(gj2,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
-    }catch(err){ /* sin provincias */ }
+    }catch(err){ console.warn('Sin capas de provincias disponibles'); }
   }
 }
 
 /* ===== CSV (fallback) ===== */
 async function loadCSV(){
+  console.log('Cargando CSV desde:', PATHS.csv);
   const res = await fetch(PATHS.csv);
   if(!res.ok) throw new Error('No se pudo descargar CSV '+PATHS.csv);
   const txt = await res.text();
   const parsed = Papa.parse(txt, { header:true, skipEmptyLines:true });
   const rows = parsed.data;
+  console.log('CSV parseado, filas:', rows.length);
 
   const want = k => Object.keys(rows[0]||{}).find(x=>x && x.toLowerCase().trim()==k.toLowerCase());
   const col = {
@@ -156,15 +158,23 @@ async function loadCSV(){
       }
     });
   }
+  console.log('Registros válidos procesados:', recs.length);
   return recs;
 }
 
 /* ===== Supabase ===== */
 function initSupabase(){
   if (!USE_SUPABASE) return null;
-  if (!window.supabase || !window.supabase.createClient) return null;
-  if (!SUPABASE.url || !SUPABASE.anonKey) return null;
+  if (!window.supabase || !window.supabase.createClient) {
+    console.warn('SDK de Supabase no disponible');
+    return null;
+  }
+  if (!SUPABASE.url || !SUPABASE.anonKey) {
+    console.warn('Configuración de Supabase incompleta');
+    return null;
+  }
   try{
+    console.log('Inicializando cliente Supabase...');
     return window.supabase.createClient(SUPABASE.url, SUPABASE.anonKey);
   }catch(e){
     console.warn('No se pudo crear cliente de Supabase:', e);
@@ -173,6 +183,7 @@ function initSupabase(){
 }
 
 async function loadFromSupabase(client){
+  console.log('Cargando datos desde Supabase...');
   const cols = [
     'COD_DISTRI','NOM_DISTRI','DIRECCION',
     'DPA_PARROQ','DPA_DESPAR','DPA_CANTON','DPA_DESCAN',
@@ -182,6 +193,8 @@ async function loadFromSupabase(client){
 
   const { data, error } = await client.from('distritos').select(cols);
   if (error) throw error;
+  
+  console.log('Datos de Supabase cargados:', data.length, 'registros');
 
   return data.map(r => ({
     lat: Number(r.Latitud),
@@ -229,7 +242,13 @@ function openPopupFor(r){
     if (Math.abs(p.lat-r.lat)<1e-6 && Math.abs(p.lng-r.lng)<1e-6) found=l;
   });
   map.setView([r.lat,r.lng], 12);
-  if(found) found.openPopup();
+  if(found) {
+    found.openPopup();
+    // Actualizar panel de distrito seleccionado
+    if (window.showDistritoDetails) {
+      window.showDistritoDetails(r.campos);
+    }
+  }
 }
 
 let suggestEl=null, activeIndex=-1, lastSuggestRows=[];
@@ -335,6 +354,14 @@ function markerFor(r){
   const m = L.circleMarker([r.lat,r.lng],{radius:8,fillColor:colorFor(r.complement),color:'#fff',weight:2,fillOpacity:.95});
   m.bindPopup(popupHTML(r.campos),{maxWidth:560,autoPan:false});
   m.bindTooltip(`${r.campos.COD_DISTRI||""}`,{permanent:false,direction:'top',opacity:.85});
+  
+  // Agregar evento click para actualizar dashboard
+  m.on('click', () => {
+    if (window.showDistritoDetails) {
+      window.showDistritoDetails(r.campos);
+    }
+  });
+  
   return m;
 }
 
@@ -345,6 +372,11 @@ function render(){
   Q('#nTotal').textContent = nTotal.toLocaleString();
   Q('#nFilt').textContent  = filtered.length.toLocaleString();
   Q('#counter').innerHTML  = `${nTotal} distritos • filtros activos: ${filtered.length} visibles`;
+  
+  // Actualizar dashboard si está disponible
+  if (window.updateDashboard) {
+    window.updateDashboard(records, filtered);
+  }
 }
 
 function applyFilters(updateUrl=false){
@@ -414,8 +446,10 @@ function exportCSV(){
 /* ===== Arranque ===== */
 async function init(){
   try{
+    console.log('Iniciando aplicación...');
+    
     // Logo opcional
-    fetch(PATHS.logo).catch(()=>{});
+    fetch(PATHS.logo).catch(()=>{console.log('Logo no disponible')});
 
     // Provincias (TopoJSON con fallback)
     await loadProvincias();
@@ -424,16 +458,25 @@ async function init(){
     supabaseClient = initSupabase();
     if (supabaseClient) {
       try{
+        console.log('Intentando cargar desde Supabase...');
         records = await loadFromSupabase(supabaseClient);
+        console.log('✅ Datos cargados desde Supabase:', records.length);
       }catch(err){
-        console.warn('Fallo Supabase, usando CSV:', err);
+        console.warn('❌ Fallo Supabase, usando CSV fallback:', err);
         records = await loadCSV();
+        console.log('✅ Datos cargados desde CSV:', records.length);
       }
     } else {
+      console.log('Supabase no configurado, usando CSV...');
       records = await loadCSV();
+      console.log('✅ Datos cargados desde CSV:', records.length);
     }
 
-    // (Paso 5) índice de búsqueda + autocomplete
+    if (!records.length) {
+      throw new Error('No se pudieron cargar datos de ninguna fuente');
+    }
+
+    // Índice de búsqueda + autocomplete
     buildSearchIndex();
     setupSuggest();
 
@@ -463,10 +506,12 @@ async function init(){
     }
     filtered = records.slice();
     applyFilters(false);
+    
+    console.log('✅ Aplicación inicializada correctamente');
   }catch(e){
-    console.error(e);
-    Q('#counter').innerHTML = "❌ Error cargando datos";
-    alert("No se pudieron cargar los datos (Supabase/CSV) o provincias.");
+    console.error('❌ Error fatal:', e);
+    Q('#counter').innerHTML = "❌ Error cargando datos: " + e.message;
+    alert("Error: " + e.message + "\n\nRevisa la consola para más detalles.");
   }finally{
     const loading = document.getElementById('loading');
     if (loading) loading.style.display='none';

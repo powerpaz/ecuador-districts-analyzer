@@ -1,19 +1,20 @@
 /* =================== CONFIG =================== */
 const PATHS = {
   csv: 'data/distritos.csv',
-  provincias: 'data/provincias.topo.json',       // preferido (TopoJSON liviano)
-  provinciasFallback: 'data/provincias.geojson', // fallback si no hay topo
-  logo: 'data/logo.png'                          // opcional
+  // ← EXISTE en tu repo (ver /data)
+  provincias: 'data/provincias.json',
+  // Fallback por si subes un GeoJSON separado
+  provinciasFallback: 'data/provincias.geojson',
+  // tu index.html ya carga logo.png desde raíz
+  logo: 'logo.png'
 };
 // Fuerza contador fijo (ej. 140). null = dinámico
-const FORCE_COUNT = null;
+const FORCE_COUNT = 140;
 
 // === Supabase (usa el SDK UMD que incluyes en index.html) ===
 const USE_SUPABASE = true;
 const SUPABASE = {
-  // ⚠️ URL CORREGIDA (faltaba una 'p')
-  url: 'https://eunujfywdwipguoptru.supabase.co',
-  // ⚠️ Tu anon key pública (puede quedar en frontend)
+  url: 'https://eunujfywdwipguopstru.supabase.co',
   anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs'
 };
 
@@ -40,7 +41,7 @@ function colorFor(cat){
   for (const k in t) if (cat && cat.toUpperCase().indexOf(k)>=0) return t[k];
   return "#2563eb";
 }
-function popupHTML(c){ 
+function popupHTML(c){
   const row=(l,v)=>!v||String(v).trim()===''?'':`<div style="padding:6px;border-left:3px solid #3a5899"><b>${l}:</b> <span style="opacity:.9">${v}</span></div>`;
   return `<div style="width:520px;font-family:system-ui;">
     <div style="background:linear-gradient(135deg,#5b7cff,#7a4ad8);color:#fff;padding:12px;margin:-8px -8px 10px;border-radius:10px;">
@@ -55,34 +56,24 @@ function popupHTML(c){
       ${row("Longitud",c.Longitud)}${row("Latitud",c.Latitud)}
     </div></div>`;
 }
-
-// Acento-insensible / case-insensitive para búsqueda
-function norm(s){ return (s ?? '')
-  .toString()
-  .normalize('NFD')
-  .replace(/\p{Diacritic}/gu,'')
-  .toLowerCase(); }
+// Búsqueda normalizada
+function norm(s){ return (s ?? '').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
 
 /* ===== Estado global ===== */
-let records = [];       // base
-let filtered = [];      // filtrada
-let chips = [];         // lista de categorías
-let provs = [];         // provincias únicas
-let cantByProv = {};    // cantones por provincia
+let records = [];
+let filtered = [];
+let chips = [];
+let provs = [];
+let cantByProv = {};
 let selectedCats = new Set();
 let provLayer=null;
 let supabaseClient = null;
-
-// Índice de búsqueda
 let SEARCH = { index: [] };
 
 /* ===== Mapa ===== */
 const map = L.map('map', { zoomControl:true }).setView([-1.8312, -78.1834], 6);
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap'}).addTo(map);
-const sat = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { attribution:'© Esri' }
-);
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri' });
 L.control.layers({"Mapa Estándar":osm,"Vista Satelital":sat},{},{collapsed:false}).addTo(map);
 const cluster = L.markerClusterGroup({
   chunkedLoading:true,
@@ -93,37 +84,36 @@ const cluster = L.markerClusterGroup({
 });
 map.addLayer(cluster);
 
-/* ===== Provincias (TopoJSON con fallback a GeoJSON) ===== */
+/* ===== Provincias (TopoJSON o GeoJSON con fallback) ===== */
 async function loadProvincias(){
-  try{
-    const r = await fetch(PATHS.provincias);
-    if(!r.ok) throw new Error('Topo no disponible');
-    const topo = await r.json();
-    let gj = topo;
-    if (topo && topo.type === 'Topology' && typeof topojson !== 'undefined') {
-      const first = Object.values(topo.objects)[0];
-      gj = topojson.feature(topo, first);
+  async function tryLoad(url){
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('No encontrado: '+url);
+    const j = await r.json();
+    if (j && j.type === 'Topology' && typeof topojson !== 'undefined') {
+      const first = Object.values(j.objects)[0];
+      return topojson.feature(j, first);
     }
+    return j; // ya es GeoJSON
+  }
+  try{
+    const gj = await tryLoad(PATHS.provincias);
     provLayer = L.geoJSON(gj,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
   }catch(e){
     try{
-      const r2 = await fetch(PATHS.provinciasFallback);
-      if(!r2.ok) return;
-      const gj2 = await r2.json();
+      const gj2 = await tryLoad(PATHS.provinciasFallback);
       provLayer = L.geoJSON(gj2,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
-    }catch(err){ console.warn('Sin capas de provincias disponibles'); }
+    }catch(err){ console.warn('Sin capas de provincias disponibles', err); }
   }
 }
 
 /* ===== CSV (fallback) ===== */
 async function loadCSV(){
-  console.log('Cargando CSV desde:', PATHS.csv);
   const res = await fetch(PATHS.csv);
   if(!res.ok) throw new Error('No se pudo descargar CSV '+PATHS.csv);
   const txt = await res.text();
   const parsed = Papa.parse(txt, { header:true, skipEmptyLines:true });
   const rows = parsed.data;
-  console.log('CSV parseado, filas:', rows.length);
 
   const want = k => Object.keys(rows[0]||{}).find(x=>x && x.toLowerCase().trim()==k.toLowerCase());
   const col = {
@@ -158,44 +148,30 @@ async function loadCSV(){
       }
     });
   }
-  console.log('Registros válidos procesados:', recs.length);
   return recs;
 }
 
 /* ===== Supabase ===== */
 function initSupabase(){
   if (!USE_SUPABASE) return null;
-  if (!window.supabase || !window.supabase.createClient) {
-    console.warn('SDK de Supabase no disponible');
-    return null;
-  }
-  if (!SUPABASE.url || !SUPABASE.anonKey) {
-    console.warn('Configuración de Supabase incompleta');
-    return null;
-  }
+  if (!window.supabase || !window.supabase.createClient) return null;
+  if (!SUPABASE.url || !SUPABASE.anonKey) return null;
   try{
-    console.log('Inicializando cliente Supabase...');
     return window.supabase.createClient(SUPABASE.url, SUPABASE.anonKey);
   }catch(e){
     console.warn('No se pudo crear cliente de Supabase:', e);
     return null;
   }
 }
-
 async function loadFromSupabase(client){
-  console.log('Cargando datos desde Supabase...');
   const cols = [
     'COD_DISTRI','NOM_DISTRI','DIRECCION',
     'DPA_PARROQ','DPA_DESPAR','DPA_CANTON','DPA_DESCAN',
     'DPA_PROVIN','DPA_DESPRO','ZONA','NMT_25','COMPLEMENT',
     'Capital_Pr','Latitud','Longitud'
   ].join(',');
-
   const { data, error } = await client.from('distritos').select(cols);
   if (error) throw error;
-  
-  console.log('Datos de Supabase cargados:', data.length, 'registros');
-
   return data.map(r => ({
     lat: Number(r.Latitud),
     lng: Number(r.Longitud),
@@ -216,7 +192,6 @@ function buildSearchIndex(){
     text: norm(`${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''} ${r.provincia||''} ${r.canton||''}`)
   }));
 }
-
 function searchTop(q, limit=8){
   q = norm(q);
   if(!q) return [];
@@ -234,7 +209,6 @@ function searchTop(q, limit=8){
   out.sort((a,b)=>b.score-a.score);
   return out.slice(0,limit).map(x=>x.r);
 }
-
 function openPopupFor(r){
   let found=null;
   cluster.eachLayer(l=>{
@@ -242,19 +216,16 @@ function openPopupFor(r){
     if (Math.abs(p.lat-r.lat)<1e-6 && Math.abs(p.lng-r.lng)<1e-6) found=l;
   });
   map.setView([r.lat,r.lng], 12);
-  if(found) {
+  if(found){
     found.openPopup();
-    // Actualizar panel de distrito seleccionado
-    if (window.showDistritoDetails) {
-      window.showDistritoDetails(r.campos);
-    }
+    if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
   }
 }
 
+/* Autocomplete UI */
 let suggestEl=null, activeIndex=-1, lastSuggestRows=[];
 function setupSuggest(){
-  const qEl = Q('#q');
-  const wrap = qEl.parentElement;
+  const qEl = Q('#q'); const wrap = qEl.parentElement;
   wrap.style.position = 'relative';
   suggestEl = document.createElement('div');
   suggestEl.id = 'suggest';
@@ -265,14 +236,13 @@ function setupSuggest(){
     maxHeight:'260px', overflowY:'auto', zIndex:1000
   });
   wrap.appendChild(suggestEl);
-
   qEl.addEventListener('input', onSearchInput);
   qEl.addEventListener('keydown', onSearchKey);
   qEl.addEventListener('blur', ()=> setTimeout(()=>suggestEl.style.display='none',150));
 }
 function onSearchInput(e){
   const q = e.target.value;
-  applyFilters(true); // mantiene filtro
+  applyFilters(true);
   lastSuggestRows = searchTop(q, 8);
   renderSuggest(lastSuggestRows);
 }
@@ -288,8 +258,7 @@ function onSearchKey(e){
   }
 }
 function renderSuggest(rows){
-  suggestEl.innerHTML='';
-  activeIndex=-1;
+  suggestEl.innerHTML=''; activeIndex=-1;
   if(!rows.length){ suggestEl.style.display='none'; return; }
   rows.forEach((r,i)=>{
     const div=document.createElement('div');
@@ -328,7 +297,6 @@ function makeChips(){
     box.appendChild(el);
   });
 }
-
 function buildCombos(){
   const setProv = new Set(records.map(r=>r.provincia).filter(Boolean));
   provs = Array.from(setProv).sort((a,b)=>a.localeCompare(b));
@@ -349,22 +317,13 @@ function buildCombos(){
   };
   Q('#cantonSel').onchange = ()=> applyFilters(true);
 }
-
 function markerFor(r){
   const m = L.circleMarker([r.lat,r.lng],{radius:8,fillColor:colorFor(r.complement),color:'#fff',weight:2,fillOpacity:.95});
   m.bindPopup(popupHTML(r.campos),{maxWidth:560,autoPan:false});
   m.bindTooltip(`${r.campos.COD_DISTRI||""}`,{permanent:false,direction:'top',opacity:.85});
-  
-  // Agregar evento click para actualizar dashboard
-  m.on('click', () => {
-    if (window.showDistritoDetails) {
-      window.showDistritoDetails(r.campos);
-    }
-  });
-  
+  m.on('click', ()=>{ if (window.showDistritoDetails) window.showDistritoDetails(r.campos); });
   return m;
 }
-
 function render(){
   cluster.clearLayers();
   filtered.forEach(r=> cluster.addLayer(markerFor(r)));
@@ -372,13 +331,8 @@ function render(){
   Q('#nTotal').textContent = nTotal.toLocaleString();
   Q('#nFilt').textContent  = filtered.length.toLocaleString();
   Q('#counter').innerHTML  = `${nTotal} distritos • filtros activos: ${filtered.length} visibles`;
-  
-  // Actualizar dashboard si está disponible
-  if (window.updateDashboard) {
-    window.updateDashboard(records, filtered);
-  }
+  if (window.updateDashboard) window.updateDashboard(records, filtered);
 }
-
 function applyFilters(updateUrl=false){
   const q  = Q('#q').value.trim();
   const p  = Q('#provSel').value;
@@ -388,7 +342,6 @@ function applyFilters(updateUrl=false){
     if(c && r.canton!==c) return false;
     if(selectedCats.size>0 && !selectedCats.has(r.complement)) return false;
     if(q){
-      // búsqueda ampliada y acento-insensible
       const haystack = norm(`${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''} ${r.provincia||''} ${r.canton||''}`);
       if (!haystack.includes(norm(q))) return false;
     }
@@ -404,7 +357,6 @@ function applyFilters(updateUrl=false){
   }
   render();
 }
-
 function loadFromURL(){
   const u = new URL(location.href);
   const q = u.searchParams.get('q')||'';
@@ -424,7 +376,6 @@ function loadFromURL(){
     Array.from(box.children).forEach(b=>{ if(b.textContent.startsWith(cat+' ')) b.classList.add('active'); });
   });
 }
-
 function exportCSV(){
   if(!filtered.length){ alert('No hay registros filtrados para exportar.'); return; }
   const cols = Object.keys(filtered[0].campos);
@@ -446,40 +397,30 @@ function exportCSV(){
 /* ===== Arranque ===== */
 async function init(){
   try{
-    console.log('Iniciando aplicación...');
-    
     // Logo opcional
-    fetch(PATHS.logo).catch(()=>{console.log('Logo no disponible')});
+    fetch(PATHS.logo).catch(()=>{});
 
-    // Provincias (TopoJSON con fallback)
+    // Provincias
     await loadProvincias();
 
     // Supabase o CSV
     supabaseClient = initSupabase();
     if (supabaseClient) {
       try{
-        console.log('Intentando cargar desde Supabase...');
         records = await loadFromSupabase(supabaseClient);
-        console.log('✅ Datos cargados desde Supabase:', records.length);
       }catch(err){
-        console.warn('❌ Fallo Supabase, usando CSV fallback:', err);
+        console.warn('Fallo Supabase, usando CSV:', err);
         records = await loadCSV();
-        console.log('✅ Datos cargados desde CSV:', records.length);
       }
     } else {
-      console.log('Supabase no configurado, usando CSV...');
       records = await loadCSV();
-      console.log('✅ Datos cargados desde CSV:', records.length);
     }
 
-    if (!records.length) {
-      throw new Error('No se pudieron cargar datos de ninguna fuente');
-    }
+    if(!records.length) throw new Error('No se pudieron cargar datos');
 
-    // Índice de búsqueda + autocomplete
+    // ÍNDICE búsqueda + UI
     buildSearchIndex();
     setupSuggest();
-
     makeChips();
     buildCombos();
     loadFromURL();
@@ -492,7 +433,6 @@ async function init(){
       applyFilters(false);
     };
     Q('#btnExport').onclick = exportCSV;
-
     Q('#btnProv').onclick = ()=>{ 
       if(!provLayer) return; 
       if(map.hasLayer(provLayer)){ map.removeLayer(provLayer); Q('#btnProv').textContent='Provincias: OFF'; }
@@ -506,15 +446,15 @@ async function init(){
     }
     filtered = records.slice();
     applyFilters(false);
-    
-    console.log('✅ Aplicación inicializada correctamente');
   }catch(e){
-    console.error('❌ Error fatal:', e);
-    Q('#counter').innerHTML = "❌ Error cargando datos: " + e.message;
-    alert("Error: " + e.message + "\n\nRevisa la consola para más detalles.");
+    console.error(e);
+    Q('#counter').innerHTML = "❌ Error cargando datos";
+    alert("No se pudieron cargar los datos (Supabase/CSV) o provincias.");
   }finally{
     const loading = document.getElementById('loading');
     if (loading) loading.style.display='none';
   }
 }
 init();
+
+

@@ -21,19 +21,72 @@
 <!-- Supabase UMD (SOLO una vez, antes de app.js) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
+<!-- Chart.js para gráficos del dashboard -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
   :root{
     --bg:#07162f; --card:#0d2249; --muted:#99a2b1; --grad1:#5b7cff; --grad2:#7a4ad8;
     --chip:#fff; --chip-border:#e5e7eb; --ok:#10b981; --accent:#5b7cff;
+    --danger:#ef4444; --warning:#f59e0b; --info:#0ea5e9;
   }
-  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:#eaf0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto}
-  .wrap{max-width:1280px;margin:0 auto;padding:18px}
-  .header{background:linear-gradient(90deg,var(--grad1),var(--grad2));border-radius:16px;padding:18px 22px;margin-bottom:12px;box-shadow:0 10px 24px rgba(0,0,0,.14)}
-  .header h1{margin:0;font-size:24px}
-  .counter{opacity:.95;margin-top:6px}
-  .grid{display:grid;grid-template-columns:340px 1fr;gap:12px}
+  *{box-sizing:border-box} 
+  body{margin:0;background:var(--bg);color:#eaf0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  .wrap{max-width:1400px;margin:0 auto;padding:18px}
+  
+  /* Header mejorado con logo */
+  .header{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+    border-radius:16px;padding:18px 22px;margin-bottom:12px;
+    box-shadow:0 10px 24px rgba(0,0,0,.14);
+    display:flex;align-items:center;gap:16px;
+  }
+  .logo-container{
+    width:60px;height:60px;border-radius:12px;
+    background:rgba(255,255,255,0.1);border:2px solid rgba(255,255,255,0.2);
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;
+  }
+  .logo-container img{max-width:100%;max-height:100%;object-fit:contain;}
+  .logo-placeholder{
+    width:40px;height:40px;background:rgba(255,255,255,0.3);
+    border-radius:8px;display:flex;align-items:center;justify-content:center;
+    font-size:18px;font-weight:bold;color:#fff;
+  }
+  .header-content{flex:1;}
+  .header h1{margin:0;font-size:28px;font-weight:800;}
+  .counter{opacity:.95;margin-top:6px;font-size:14px;}
+  
+  /* Layout principal */
+  .main-grid{display:grid;grid-template-columns:340px 1fr;gap:12px;margin-bottom:12px;}
   .card{background:var(--card);border-radius:16px;padding:14px;border:1px solid #143166;box-shadow:0 6px 18px rgba(0,0,0,.2)}
-  #map{height:72vh;width:100%;border-radius:14px}
+  
+  /* Mapa */
+  #map{height:65vh;width:100%;border-radius:14px}
+  
+  /* Dashboard inferior */
+  .dashboard{display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px;margin-top:12px;}
+  .dashboard-card{background:var(--card);border-radius:16px;padding:16px;border:1px solid #143166;box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .dashboard-card h3{margin:0 0 12px 0;font-size:16px;font-weight:700;color:#dbe3ff;}
+  
+  /* KPI Cards */
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));gap:8px;}
+  .kpi-card{background:rgba(91,124,255,0.1);border:1px solid rgba(91,124,255,0.3);border-radius:12px;padding:12px;text-align:center;}
+  .kpi-value{font-size:24px;font-weight:800;color:var(--accent);margin-bottom:4px;}
+  .kpi-label{font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;}
+  
+  /* Gráficos */
+  .chart-container{height:200px;position:relative;}
+  canvas{max-height:100%;}
+  
+  /* Tabla de datos */
+  .data-table{max-height:200px;overflow-y:auto;border-radius:8px;border:1px solid #1b386f;}
+  .data-table table{width:100%;border-collapse:collapse;}
+  .data-table th,.data-table td{padding:8px 10px;text-align:left;border-bottom:1px solid #1b386f;}
+  .data-table th{background:#0a1c3b;font-weight:600;font-size:12px;color:var(--muted);}
+  .data-table td{font-size:13px;}
+  
+  /* Existing styles */
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .label{font-weight:700;margin:4px 0 6px 0;color:#dbe3ff}
   .input, select{width:100%;padding:10px 12px;border-radius:12px;border:2px solid #1b386f;background:#0a1c3b;color:#eaf0ff}
@@ -47,18 +100,34 @@
   .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
   .dot{display:inline-block;width:12px;height:12px;border-radius:999px;margin-right:6px;border:2px solid #fff}
   .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0006;color:#fff;font-weight:800;z-index:999}
+  
+  /* Responsive */
+  @media (max-width: 768px) {
+    .main-grid{grid-template-columns:1fr;}
+    .header{flex-direction:column;text-align:center;}
+    .dashboard{grid-template-columns:1fr;}
+  }
 </style>
 </head>
 <body>
 <div id="loading" class="loading">Cargando datos…</div>
 
 <div class="wrap">
+  <!-- Header mejorado con espacio para logo -->
   <div class="header">
-    <h1>Nuevo Modelo Territorial — MINEDEC 2025</h1>
-    <div id="counter" class="counter"></div>
+    <div class="logo-container">
+      <!-- Reemplaza src="logo.png" con tu logo -->
+      <img id="logo" src="logo.png" alt="Logo" style="display:none;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="logo-placeholder">EC</div>
+    </div>
+    <div class="header-content">
+      <h1>Sistema Geoespacial de Distritos Educativos</h1>
+      <div id="counter" class="counter">Ministerio de Educación • Ecuador 2025</div>
+    </div>
   </div>
 
-  <div class="grid">
+  <!-- Grid principal: Filtros + Mapa -->
+  <div class="main-grid">
     <div class="card">
       <div class="label">🔎 Búsqueda</div>
       <input id="q" class="input" type="search" placeholder="Buscar por código o nombre de distrito…">
@@ -106,14 +175,274 @@
 
     <div class="card"><div id="map"></div></div>
   </div>
+
+  <!-- Dashboard Geoespacial -->
+  <div class="dashboard">
+    <!-- KPIs Principales -->
+    <div class="dashboard-card">
+      <h3>📊 Métricas Generales</h3>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-value" id="totalDistritos">—</div>
+          <div class="kpi-label">Total Distritos</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value" id="totalProvincias">—</div>
+          <div class="kpi-label">Provincias</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value" id="totalCantones">—</div>
+          <div class="kpi-label">Cantones</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value" id="filteredCount">—</div>
+          <div class="kpi-label">Visible en Mapa</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gráfico de Distribución por Provincia -->
+    <div class="dashboard-card">
+      <h3>📍 Distribución por Provincia</h3>
+      <div class="chart-container">
+        <canvas id="provinciaChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Gráfico de Distribución por Complemento -->
+    <div class="dashboard-card">
+      <h3>🏷️ Distribución por Tipo</h3>
+      <div class="chart-container">
+        <canvas id="complementChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Top 5 Provincias -->
+    <div class="dashboard-card">
+      <h3>🏆 Top 5 Provincias</h3>
+      <div class="data-table" id="topProvincias">
+        <table>
+          <thead>
+            <tr>
+              <th>Provincia</th>
+              <th>Distritos</th>
+              <th>%</th>
+            </tr>
+          </thead>
+          <tbody id="topProvinciasBody">
+            <tr><td colspan="3">Cargando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Estadísticas Geográficas -->
+    <div class="dashboard-card">
+      <h3>🌍 Estadísticas Geográficas</h3>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-value" id="latPromedio">—</div>
+          <div class="kpi-label">Lat. Promedio</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value" id="lngPromedio">—</div>
+          <div class="kpi-label">Lng. Promedio</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value" id="rangoLat">—</div>
+          <div class="kpi-label">Rango Lat.</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value" id="rangoLng">—</div>
+          <div class="kpi-label">Rango Lng.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Información del Distrito Seleccionado -->
+    <div class="dashboard-card">
+      <h3>📌 Distrito Seleccionado</h3>
+      <div id="selectedDistrito">
+        <p style="text-align:center;color:var(--muted);font-style:italic;">Haz clic en un marcador del mapa para ver detalles</p>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- Script para mostrar logo si existe -->
+<script>
+// Intentar cargar el logo
+const logoImg = document.getElementById('logo');
+const logoPlaceholder = document.querySelector('.logo-placeholder');
+
+// Si el logo carga exitosamente, ocultamos el placeholder
+logoImg.onload = function() {
+  logoImg.style.display = 'block';
+  logoPlaceholder.style.display = 'none';
+};
+
+// Variables globales para los gráficos del dashboard
+window.dashboardCharts = {
+  provinciaChart: null,
+  complementChart: null
+};
+
+// Función para actualizar el dashboard (se llamará desde app.js)
+window.updateDashboard = function(data, filteredData) {
+  if (!data || !Array.isArray(data)) return;
+  
+  // Actualizar KPIs
+  const provincias = [...new Set(data.map(d => d.dpa_despro || d.DPA_DESPRO))];
+  const cantones = [...new Set(data.map(d => d.dpa_descan || d.DPA_DESCAN))];
+  
+  document.getElementById('totalDistritos').textContent = data.length.toLocaleString();
+  document.getElementById('totalProvincias').textContent = provincias.length;
+  document.getElementById('totalCantones').textContent = cantones.length;
+  document.getElementById('filteredCount').textContent = (filteredData || data).length.toLocaleString();
+  
+  // Estadísticas geográficas
+  const lats = data.filter(d => d.latitud || d.Latitud).map(d => parseFloat(d.latitud || d.Latitud));
+  const lngs = data.filter(d => d.longitud || d.Longitud).map(d => parseFloat(d.longitud || d.Longitud));
+  
+  if (lats.length > 0 && lngs.length > 0) {
+    const avgLat = (lats.reduce((a, b) => a + b, 0) / lats.length).toFixed(3);
+    const avgLng = (lngs.reduce((a, b) => a + b, 0) / lngs.length).toFixed(3);
+    const rangeLat = (Math.max(...lats) - Math.min(...lats)).toFixed(2);
+    const rangeLng = (Math.max(...lngs) - Math.min(...lngs)).toFixed(2);
+    
+    document.getElementById('latPromedio').textContent = avgLat;
+    document.getElementById('lngPromedio').textContent = avgLng;
+    document.getElementById('rangoLat').textContent = rangeLat + '°';
+    document.getElementById('rangoLng').textContent = rangeLng + '°';
+  }
+  
+  // Top 5 provincias
+  const provinciaCounts = {};
+  data.forEach(d => {
+    const prov = d.dpa_despro || d.DPA_DESPRO || 'Sin provincia';
+    provinciaCounts[prov] = (provinciaCounts[prov] || 0) + 1;
+  });
+  
+  const topProvincias = Object.entries(provinciaCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  const topProvinciasBody = document.getElementById('topProvinciasBody');
+  topProvinciasBody.innerHTML = topProvincias.map(([prov, count]) => {
+    const percentage = ((count / data.length) * 100).toFixed(1);
+    return `<tr><td>${prov}</td><td>${count}</td><td>${percentage}%</td></tr>`;
+  }).join('');
+  
+  // Actualizar gráficos
+  updateProvinciaChart(provinciaCounts);
+  updateComplementChart(data);
+};
+
+// Función para actualizar gráfico de provincias
+function updateProvinciaChart(provinciaCounts) {
+  const ctx = document.getElementById('provinciaChart').getContext('2d');
+  
+  if (window.dashboardCharts.provinciaChart) {
+    window.dashboardCharts.provinciaChart.destroy();
+  }
+  
+  const top8 = Object.entries(provinciaCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  
+  window.dashboardCharts.provinciaChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top8.map(([prov]) => prov.length > 12 ? prov.substring(0, 12) + '...' : prov),
+      datasets: [{
+        data: top8.map(([, count]) => count),
+        backgroundColor: 'rgba(91, 124, 255, 0.6)',
+        borderColor: 'rgba(91, 124, 255, 1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#99a2b1', font: { size: 10 } },
+          grid: { color: 'rgba(155, 162, 177, 0.1)' }
+        },
+        x: {
+          ticks: { color: '#99a2b1', font: { size: 9 } },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
+// Función para actualizar gráfico de complementos
+function updateComplementChart(data) {
+  const ctx = document.getElementById('complementChart').getContext('2d');
+  
+  if (window.dashboardCharts.complementChart) {
+    window.dashboardCharts.complementChart.destroy();
+  }
+  
+  const complementCounts = {};
+  data.forEach(d => {
+    const comp = d.complement || d.COMPLEMENT || 'Sin categoría';
+    complementCounts[comp] = (complementCounts[comp] || 0) + 1;
+  });
+  
+  const colors = ['#2563eb', '#10b981', '#0ea5e9', '#f59e0b', '#ef4444', '#6b7280'];
+  
+  window.dashboardCharts.complementChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(complementCounts),
+      datasets: [{
+        data: Object.values(complementCounts),
+        backgroundColor: colors.slice(0, Object.keys(complementCounts).length),
+        borderColor: '#0d2249',
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#99a2b1',
+            font: { size: 10 },
+            padding: 10
+          }
+        }
+      }
+    }
+  });
+}
+
+// Función para mostrar detalles de distrito seleccionado
+window.showDistritoDetails = function(distrito) {
+  const container = document.getElementById('selectedDistrito');
+  
+  container.innerHTML = `
+    <div style="border-left: 4px solid var(--accent); padding-left: 12px;">
+      <h4 style="margin: 0 0 8px 0; color: #dbe3ff;">${distrito.nom_distri || distrito.NOM_DISTRI}</h4>
+      <p style="margin: 4px 0; font-size: 13px;"><strong>Código:</strong> ${distrito.cod_distri || distrito.COD_DISTRI}</p>
+      <p style="margin: 4px 0; font-size: 13px;"><strong>Provincia:</strong> ${distrito.dpa_despro || distrito.DPA_DESPRO}</p>
+      <p style="margin: 4px 0; font-size: 13px;"><strong>Cantón:</strong> ${distrito.dpa_descan || distrito.DPA_DESCAN}</p>
+      <p style="margin: 4px 0; font-size: 13px;"><strong>Tipo:</strong> ${distrito.complement || distrito.COMPLEMENT}</p>
+      <p style="margin: 4px 0; font-size: 13px;"><strong>Coordenadas:</strong> ${(distrito.latitud || distrito.Latitud)?.toFixed(4)}, ${(distrito.longitud || distrito.Longitud)?.toFixed(4)}</p>
+    </div>
+  `;
+};
+</script>
 
 <!-- Tu lógica principal (USA Supabase si está configurado en app.js) -->
 <script src="app.js"></script>
 </body>
 </html>
-
-
-
-
 

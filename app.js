@@ -8,7 +8,8 @@ const CONFIG = {
   csvRelative: 'data/distritos.csv',
 
   // CSV absoluto (RAW GitHub) — ajusta usuario/repo/rama si cambias
-  csvAbsolute: 'https://raw.githubusercontent.com/powerpaz/ecuador-districts-analyzer/main/data/distritos.csv',
+  csvAbsolute: 'https://raw.githubusercontent.com/powerpaz/ecuador-distrits-analyzer/main/data/distritos.csv'
+    .replace('distrits','districts'), // por si lo pego mal 😅
 
   // TopoJSON/GeoJSON de provincias (primero intenta .json; si no, .geojson)
   provinciasTopo: 'data/provincias.json',
@@ -189,6 +190,7 @@ function isValidRecord(r) {
   );
 }
 
+// === Supabase con ALIAS (snake_case → claves que usa el front) ===
 async function loadFromSupabase() {
   const url = CONFIG.supabaseUrl;
   const key = CONFIG.supabaseAnonKey;
@@ -199,12 +201,29 @@ async function loadFromSupabase() {
   }
   try {
     const client = window.supabase.createClient(url, key);
-    const cols =
-      'COD_DISTRI,NOM_DISTRI,DIRECCION,DPA_PARROQ,DPA_DESPAR,DPA_CANTON,DPA_DESCAN,DPA_PROVIN,DPA_DESPRO,ZONA,NMT_25,COMPLEMENT,Capital_Pr,Latitud,Longitud';
+    const cols = [
+      'cod_distri as COD_DISTRI',
+      'nom_distri as NOM_DISTRI',
+      'direccion  as DIRECCION',
+      'dpa_parroq as DPA_PARROQ',
+      'dpa_despar as DPA_DESPAR',
+      'dpa_canton as DPA_CANTON',
+      'dpa_descan as DPA_DESCAN',
+      'dpa_provin as DPA_PROVIN',
+      'dpa_despro as DPA_DESPRO',
+      'zona       as ZONA',
+      'nmt_25     as NMT_25',
+      'complement as COMPLEMENT',
+      'capital_pr as Capital_Pr',
+      'latitud    as Latitud',
+      'longitud   as Longitud'
+    ].join(',');
+
     const { data, error } = await client.from('distritos').select(cols);
     if (error) throw error;
+
     const mapped = (data || []).map(mapRecord).filter(isValidRecord);
-    if (mapped.length === 0) {
+    if (!mapped.length) {
       warn('Supabase devolvió 0 registros; usaré CSV');
       return null;
     }
@@ -446,12 +465,9 @@ function render() {
   const forced = CONFIG.forceTotalCount;
   const totalShown = forced ?? records.length;
 
-  const nTotalEl = $('#nTotal');
-  const nFiltEl = $('#nFilt');
-  const counterEl = $('#counter');
-  if (nTotalEl) nTotalEl.textContent = totalShown.toLocaleString();
-  if (nFiltEl) nFiltEl.textContent = filtered.length.toLocaleString();
-  if (counterEl) counterEl.innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles`;
+  $('#nTotal') && ($('#nTotal').textContent = totalShown.toLocaleString());
+  $('#nFilt') && ($('#nFilt').textContent = filtered.length.toLocaleString());
+  $('#counter') && ($('#counter').innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles`);
 
   if (window.updateDashboard) window.updateDashboard(records, filtered);
 }
@@ -488,7 +504,7 @@ function loadFromURL() {
   const c = u.searchParams.get('canton') || '';
   const cats = (u.searchParams.get('cats') || '').split('|').filter(Boolean);
 
-  if ($('#q')) $('#q').value = q;
+  $('#q') && ($('#q').value = q);
   if (p && $('#provSel')) $('#provSel').value = p;
   if (p && $('#cantonSel')) {
     const cants = Array.from(cantByProv[p] || new Set()).sort((a, b) => a.localeCompare(b));
@@ -551,9 +567,9 @@ async function init() {
     // Listeners
     $('#q')?.addEventListener('input', () => applyFilters(true));
     $('#btnAll')?.addEventListener('click', () => {
-      if ($('#q')) $('#q').value = '';
-      if ($('#provSel')) $('#provSel').value = '';
-      if ($('#cantonSel')) $('#cantonSel').innerHTML = '<option value="">Todos</option>';
+      $('#q') && ($('#q').value = '');
+      $('#provSel') && ($('#provSel').value = '');
+      $('#cantonSel') && ($('#cantonSel').innerHTML = '<option value="">Todos</option>');
       selectedCats.clear();
       document.querySelectorAll('.chip.active').forEach((x) => x.classList.remove('active'));
       history.replaceState(null, '', ' ');
@@ -582,8 +598,7 @@ async function init() {
     log(`✅ Sistema iniciado con ${records.length} registros`);
   } catch (e) {
     err('Error inicializando el sistema:', e?.message || e);
-    const counterEl = $('#counter');
-    if (counterEl) counterEl.innerHTML = '❌ Error cargando datos';
+    $('#counter') && ($('#counter').innerHTML = '❌ Error cargando datos');
     alert(
       'Error cargando el sistema.\n\n' +
         (e?.message || e) +
@@ -597,5 +612,5 @@ async function init() {
   }
 }
 
-// ¡A jugar!
+// ¡Arranque!
 init();

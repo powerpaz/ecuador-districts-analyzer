@@ -79,26 +79,55 @@ let SEARCH = { index: [] };
 let map, cluster, provLayer;
 let DATA_SOURCE = 'desconocido';
 
-/* ============ POPUP ============ */
+// ============ POPUP (solo columnas en minúsculas; fallback a MAYÚSCULAS) ============
 function popupHTML(c) {
-  const row = (l, v) =>
-    !v || String(v).trim() === ''
+  // lector seguro: primero minúsculas, si no existen prueba MAYÚSCULAS
+  const get = (lo, up) => (c?.[lo] ?? c?.[up] ?? '');
+
+  // helper para no imprimir filas vacías
+  const row = (label, lo, up) => {
+    const v = get(lo, up);
+    return (v == null || String(v).trim() === '')
       ? ''
-      : `<div style="padding:6px;border-left:3px solid #3a5899"><b>${l}:</b> <span style="opacity:.9">${v}</span></div>`;
-  return `<div style="width:520px;font-family:system-ui;">
-    <div style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:12px;margin:-8px -8px 10px;border-radius:10px;">
-      <div style="font-weight:800">${c.COD_DISTRI || ''} — ${c.NOM_DISTRI || ''}</div>
-      <div style="opacity:.9;font-size:.9em">🌐 ${formatCoord(c.Latitud)}, ${formatCoord(c.Longitud)}</div>
+      : `<div style="padding:8px 10px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.03)">
+           <div style="font-size:.72rem;letter-spacing:.02em;opacity:.75;text-transform:uppercase">${label}</div>
+           <div style="font-weight:600">${v}</div>
+         </div>`;
+  };
+
+  const cod = get('cod_distri','COD_DISTRI');
+  const nom = get('nom_distri','NOM_DISTRI');
+  const prov = get('dpa_despro','DPA_DESPRO');
+  const cant = get('dpa_descan','DPA_DESCAN');
+
+  return `
+    <div style="min-width:320px;max-width:520px;font-family:system-ui,Segoe UI,Inter,Roboto,sans-serif">
+      <!-- Encabezado -->
+      <div style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:14px 16px;border-radius:12px;margin:-6px -6px 12px -6px;box-shadow:0 6px 18px rgba(0,0,0,.25)">
+        <div style="font-weight:800;font-size:1rem;line-height:1.15">
+          ${nom || ''} ${cod ? `<span style="opacity:.9;font-weight:600">(${cod})</span>` : ''}
+        </div>
+        <div style="opacity:.9;font-size:.85rem;margin-top:2px">
+          ${prov || ''}${cant ? ' • ' + cant : ''}
+        </div>
+      </div>
+
+      <!-- Cuerpo (solo los campos solicitados) -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${row('Dirección','direccion','DIRECCION')}
+        ${row('Parroquia (código)','dpa_parroq','DPA_PARROQ')}
+        ${row('Parroquia','dpa_despar','DPA_DESPAR')}
+        ${row('Cantón (código)','dpa_canton','DPA_CANTON')}
+        ${row('Cantón','dpa_descan','DPA_DESCAN')}
+        ${row('Provincia (código)','dpa_provin','DPA_PROVIN')}
+        ${row('Provincia','dpa_despro','DPA_DESPRO')}
+        ${row('Zona','zona','ZONA')}
+        ${row('NMT_25','nmt_25','NMT_25')}
+        ${row('Categoría','complement','COMPLEMENT')}
+        ${row('Capital_Pr','capital_pr','Capital_Pr')}
+      </div>
     </div>
-    ${row('Dirección', c.DIRECCION || c.Direccion)}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      ${row('Provincia', c.DPA_DESPRO)}${row('Cantón', c.DPA_DESCAN)}
-      ${row('Parroquia', c.DPA_DESPAR)}${row('Zona', c.ZONA)}${row('NMT_25', c.NMT_25)}
-      ${row('Tipo', c.COMPLEMENT)}${row('Capital_Pr', c.Capital_Pr)}
-      ${row('X', c.X)}${row('Y', c.Y)}
-      ${row('Longitud', c.Longitud)}${row('Latitud', c.Latitud)}
-    </div>
-  </div>`;
+  `;
 }
 
 /* ============ MAPA ============ */

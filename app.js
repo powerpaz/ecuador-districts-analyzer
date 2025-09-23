@@ -187,7 +187,7 @@ function isValidRecord(r) {
   );
 }
 
-// === Supabase con ALIAS (snake_case → claves que usa el front) ===
+// === Supabase con alias correctos (alias:columna) ===
 async function loadFromSupabase() {
   const url = CONFIG.supabaseUrl;
   const key = CONFIG.supabaseAnonKey;
@@ -198,25 +198,30 @@ async function loadFromSupabase() {
   }
   try {
     const client = window.supabase.createClient(url, key);
+
+    // OJO: PostgREST usa "ALIAS:columna", no "AS"
     const cols = [
-      'cod_distri as COD_DISTRI',
-      'nom_distri as NOM_DISTRI',
-      'direccion  as DIRECCION',
-      'dpa_parroq as DPA_PARROQ',
-      'dpa_despar as DPA_DESPAR',
-      'dpa_canton as DPA_CANTON',
-      'dpa_descan as DPA_DESCAN',
-      'dpa_provin as DPA_PROVIN',
-      'dpa_despro as DPA_DESPRO',
-      'zona       as ZONA',
-      'nmt_25     as NMT_25',
-      'complement as COMPLEMENT',
-      'capital_pr as Capital_Pr',
-      'latitud    as Latitud',
-      'longitud   as Longitud',
+      'COD_DISTRI:cod_distri',
+      'NOM_DISTRI:nom_distri',
+      'DIRECCION:direccion',
+      'DPA_PARROQ:dpa_parroq',
+      'DPA_DESPAR:dpa_despar',
+      'DPA_CANTON:dpa_canton',
+      'DPA_DESCAN:dpa_descan',
+      'DPA_PROVIN:dpa_provin',
+      'DPA_DESPRO:dpa_despro',
+      'ZONA:zona',
+      'NMT_25:nmt_25',
+      'COMPLEMENT:complement',
+      'Capital_Pr:capital_pr',
+      'Latitud:latitud',
+      'Longitud:longitud'
     ].join(',');
 
-    const { data, error } = await client.from('distritos').select(cols);
+    const { data, error } = await client
+      .from('distritos')     // nombre exacto de la tabla
+      .select(cols);
+
     if (error) throw error;
 
     const mapped = (data || []).map(mapRecord).filter(isValidRecord);
@@ -224,43 +229,13 @@ async function loadFromSupabase() {
       warn('Supabase devolvió 0 registros; usaré CSV');
       return null;
     }
+
     log(`Supabase OK: ${mapped.length} registros`);
     return mapped;
   } catch (e) {
     warn('Error Supabase:', e?.message || e);
     return null;
   }
-}
-
-async function loadFromCsv(url) {
-  const r = await fetch(url, { cache: 'no-cache' });
-  if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
-  const text = await r.text();
-  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: false });
-  const mapped = parsed.data.map(mapRecord).filter(isValidRecord);
-  return mapped;
-}
-
-/* ===== NUEVO: origen de datos y prioridades ===== */
-async function loadData() {
-  const fromSb = await loadFromSupabase();
-  if (fromSb?.length) {
-    DATA_SOURCE = 'Supabase';
-    return fromSb;
-  }
-  try {
-    const fromRel = await loadFromCsv(CONFIG.csvRelative);
-    if (fromRel.length) {
-      DATA_SOURCE = 'CSV relativo';
-      return fromRel;
-    }
-  } catch {}
-  const fromAbs = await loadFromCsv(CONFIG.csvAbsolute);
-  if (fromAbs.length) {
-    DATA_SOURCE = 'CSV RAW';
-    return fromAbs;
-  }
-  throw new Error('No se pudo cargar datos de ningún origen');
 }
 
 /* ============ BÚSQUEDA Y AUTOCOMPLETE ============ */

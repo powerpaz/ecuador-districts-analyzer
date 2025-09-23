@@ -8,8 +8,9 @@ const CONFIG = {
   csvRelative: 'data/distritos.csv',
 
   // CSV absoluto (RAW GitHub) — ajusta usuario/repo/rama si cambias
-  csvAbsolute: 'https://raw.githubusercontent.com/powerpaz/ecuador-distrits-analyzer/main/data/distritos.csv'
-    .replace('distrits','districts'), // por si lo pego mal 😅
+  csvAbsolute:
+    'https://raw.githubusercontent.com/powerpaz/ecuador-distrits-analyzer/main/data/distritos.csv'
+      .replace('distrits', 'districts'), // por si lo pego mal 😅
 
   // TopoJSON/GeoJSON de provincias (primero intenta .json; si no, .geojson)
   provinciasTopo: 'data/provincias.json',
@@ -77,6 +78,9 @@ let selectedCats = new Set();
 let SEARCH = { index: [] };
 
 let map, cluster, provLayer;
+
+/* ===== Indicador de origen de datos ===== */
+let DATA_SOURCE = 'desconocido';
 
 /* ============ POPUP ============ */
 function popupHTML(c) {
@@ -155,10 +159,8 @@ async function loadProvincias() {
 
 /* ============ CARGA DE DATOS ============ */
 function mapRecord(rec) {
-  const lat =
-    toFloat(rec.Latitud ?? rec.latitud ?? rec.lat ?? rec.Lat ?? rec.Y ?? rec.y);
-  const lng =
-    toFloat(rec.Longitud ?? rec.longitud ?? rec.lng ?? rec.Lng ?? rec.X ?? rec.x);
+  const lat = toFloat(rec.Latitud ?? rec.latitud ?? rec.lat ?? rec.Lat ?? rec.Y ?? rec.y);
+  const lng = toFloat(rec.Longitud ?? rec.longitud ?? rec.lng ?? rec.Lng ?? rec.X ?? rec.x);
 
   const item = {
     lat,
@@ -175,7 +177,6 @@ function mapRecord(rec) {
       NOM_DISTRI: rec.NOM_DISTRI ?? rec.nombre ?? rec.nombre_distrito ?? rec.Nombre ?? '',
     },
   };
-
   return item;
 }
 
@@ -216,7 +217,7 @@ async function loadFromSupabase() {
       'complement as COMPLEMENT',
       'capital_pr as Capital_Pr',
       'latitud    as Latitud',
-      'longitud   as Longitud'
+      'longitud   as Longitud',
     ].join(',');
 
     const { data, error } = await client.from('distritos').select(cols);
@@ -244,27 +245,23 @@ async function loadFromCsv(url) {
   return mapped;
 }
 
+/* ===== NUEVO: origen de datos y prioridades ===== */
 async function loadData() {
-  // 1) Supabase
   const fromSb = await loadFromSupabase();
-  if (fromSb && fromSb.length) return fromSb;
-
-  // 2) CSV relativo
+  if (fromSb?.length) {
+    DATA_SOURCE = 'Supabase';
+    return fromSb;
+  }
   try {
     const fromRel = await loadFromCsv(CONFIG.csvRelative);
     if (fromRel.length) {
-      log(`CSV relativo OK: ${fromRel.length} registros`);
+      DATA_SOURCE = 'CSV relativo';
       return fromRel;
     }
-    warn('CSV relativo vacío; intento RAW…');
-  } catch (e) {
-    warn('CSV relativo falló:', e?.message || e);
-  }
-
-  // 3) CSV absoluto RAW
+  } catch {}
   const fromAbs = await loadFromCsv(CONFIG.csvAbsolute);
   if (fromAbs.length) {
-    log(`CSV absoluto OK: ${fromAbs.length} registros`);
+    DATA_SOURCE = 'CSV RAW';
     return fromAbs;
   }
   throw new Error('No se pudo cargar datos de ningún origen');
@@ -458,19 +455,24 @@ function markerFor(r) {
   });
   return m;
 }
+
+/* ===== NUEVO: contador con fuente de datos ===== */
 function render() {
   cluster.clearLayers();
   filtered.forEach((r) => cluster.addLayer(markerFor(r)));
 
-  const forced = CONFIG.forceTotalCount;
-  const totalShown = forced ?? records.length;
+  const totalShown = CONFIG.forceTotalCount ?? records.length;
 
-  $('#nTotal') && ($('#nTotal').textContent = totalShown.toLocaleString());
-  $('#nFilt') && ($('#nFilt').textContent = filtered.length.toLocaleString());
-  $('#counter') && ($('#counter').innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles`);
+  if ($('#nTotal')) $('#nTotal').textContent = totalShown.toLocaleString();
+  if ($('#nFilt')) $('#nFilt').textContent = filtered.length.toLocaleString();
+
+  const el = document.querySelector('#counter');
+  if (el)
+    el.innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles <span style="opacity:.7">(${DATA_SOURCE})</span>`;
 
   if (window.updateDashboard) window.updateDashboard(records, filtered);
 }
+
 function applyFilters(updateUrl = false) {
   const q = $('#q')?.value.trim() || '';
   const p = $('#provSel')?.value || '';
@@ -481,7 +483,9 @@ function applyFilters(updateUrl = false) {
     if (c && r.canton !== c) return false;
     if (selectedCats.size > 0 && !selectedCats.has(r.complement)) return false;
     if (q) {
-      const hay = norm(`${r.campos.COD_DISTRI || ''} ${r.campos.NOM_DISTRI || ''} ${r.provincia || ''} ${r.canton || ''}`);
+      const hay = norm(
+        `${r.campos.COD_DISTRI || ''} ${r.campos.NOM_DISTRI || ''} ${r.provincia || ''} ${r.canton || ''}`,
+      );
       if (!hay.includes(norm(q))) return false;
     }
     return true;

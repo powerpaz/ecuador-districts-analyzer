@@ -1,68 +1,53 @@
-name: Sync Supabase -> CSV
+name: pages-build-deployment
 
 on:
-  schedule:
-    - cron: "0 6 * * *"        # diario 06:00 UTC
-  workflow_dispatch:            # ejecución manual
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
-  sync:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write           # necesario para commit/push
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq
+      # (Opcional) Si no construyes nada, puedes borrar estas 2 líneas:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build (opcional)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          npm ci --if-present || true
+          npm run build --if-present || true
 
-      - name: Fetch from Supabase and build CSV
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: |
-          set -Eeuo pipefail
-          mkdir -p data
+      # 🔴 SUBIR UN ÚNICO ARTEFACTO con nombre propio
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./            # carpeta que quieres publicar
+          name: site          # ← nombre único del artefacto
 
-          # Limpia posibles \r o espacios finales por copias desde Windows
-          URL="$(echo "$SUPABASE_URL"      | tr -d '\r' | sed 's/[[:space:]]*$//')"
-          KEY="$(echo "$SUPABASE_ANON_KEY" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: site  # ← debe coincidir con el de arriba
 
-          echo "URL length: ${#URL}"
-          echo "KEY length: ${#KEY}"
-
-          SELECT='cod_distri,nom_distri,direccion,dpa_parroq,dpa_despar,dpa_canton,dpa_descan,dpa_provin,dpa_despro,zona,nmt_25,complement,capital_pr,latitud,longitud'
-
-          # Descarga: -fS -> falla si HTTP >= 400, -G + --data-urlencode -> query segura
-          curl -fS -G "$URL/rest/v1/distritos" \
-            --data-urlencode "select=$SELECT" \
-            -H "apikey: $KEY" \
-            -H "Authorization: Bearer $KEY" \
-            -H "Accept: application/json" \
-            -o data/distritos.json
-
-          # Convierte JSON -> CSV (primera fila = encabezados)
-          jq -r '(.[0] | keys_unsorted) as $k | $k, (.[] | [.[ $k[] ]]) | @csv' \
-            data/distritos.json > data/distritos.csv
-
-          # Sanity check
-          head -2 data/distritos.csv
-          echo "Total lines: $(wc -l < data/distritos.csv)"
-
-          rm -f data/distritos.json
-
-      - name: Commit CSV if changed
-        run: |
-          if git diff --quiet -- data/distritos.csv; then
-            echo "No changes in CSV file"
-          else
-            git config user.name  "github-actions"
-            git config user.email "actions@github.com"
-            git add data/distritos.csv
-            git commit -m "Auto-sync: Update CSV from Supabase [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
-            git push
-          fi

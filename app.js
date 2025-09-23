@@ -1,252 +1,601 @@
+/* =========================================================
+   ECUADOR DISTRICTS ANALYZER — JS ROBUSTO PARA PAGES
+   ========================================================= */
+
 /* =================== CONFIG =================== */
-const PATHS = {
-  csv: 'data/distritos.csv',
-  provincias: 'data/provincias.json',        // Topology (TopoJSON)
-  provinciasFallback: 'data/provincias.geojson', // GeoJSON
-  logo: 'logo.png'
-};
-// Fuerza contador fijo (ej. 140). null = dinámico
-const FORCE_COUNT = 140;
+const CONFIG = {
+  // CSV relativo (si /data está junto a index.html)
+  csvRelative: 'data/distritos.csv',
 
-// === Supabase (usa el SDK UMD que incluyes en index.html) ===
-const USE_SUPABASE = true;
-const SUPABASE = {
-  url: 'https://eunujfywdwipguopstru.supabase.co',
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs'
+  // CSV absoluto (RAW GitHub) — ajusta usuario/repo/rama si cambias
+  csvAbsolute: 'https://raw.githubusercontent.com/powerpaz/ecuador-districts-analyzer/main/data/distritos.csv',
+
+  // TopoJSON/GeoJSON de provincias (primero intenta .json; si no, .geojson)
+  provinciasTopo: 'data/provincias.json',
+  provinciasGeo: 'data/provincias.geojson',
+
+  // Logo opcional (no detiene la app si no existe)
+  logo: 'logo.png',
+
+  // Fuerza contador total visible en cabecera; pon null para que sea dinámico
+  forceTotalCount: 140,
+
+  // Supabase (deja url/anonKey en "" si quieres desactivarlo)
+  supabaseUrl: 'https://eunujfywdwipguopstru.supabase.co',
+  supabaseAnonKey:
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs',
 };
 
-/* ===== Utils ===== */
-const Q = sel => document.querySelector(sel);
-function toFloat(v){
-  if(v==null || v==='') return null;
-  if(typeof v==='number') return v;
-  let s = String(v).trim().replace(/\s+/g,'');
-  if(s.includes(',') && s.includes('.')) s = s.replace(/\./g,'').replace(',', '.');
-  else if(s.includes(',') && !s.includes('.')) s = s.replace(',', '.');
+/* ============ UTILIDADES BÁSICAS ============ */
+const $ = (sel) => document.querySelector(sel);
+const log = (...a) => console.log('[EC-Distritos]', ...a);
+const warn = (...a) => console.warn('[EC-Distritos]', ...a);
+const err = (...a) => console.error('[EC-Distritos]', ...a);
+
+function toFloat(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let s = String(v).trim().replace(/\s+/g, '');
+  if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
+  else if (s.includes(',') && !s.includes('.')) s = s.replace(',', '.');
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
-function colorFor(cat){
-  const t={
-    "MINEDUC":"#2563eb",
-    "SENECYT":"#10b981",
-    "SENECYT - ZONA DEPORTE":"#0ea5e9",
-    "ZONA DEPORTE":"#f59e0b",
-    "OT DEPORTE":"#ef4444",
-    "SIN ETIQUETA":"#6b7280"
+function norm(s) {
+  return (s ?? '')
+    .toString()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim();
+}
+function colorFor(cat) {
+  const M = {
+    MINEDUC: '#2563eb',
+    SENECYT: '#10b981',
+    'SENECYT - ZONA DEPORTE': '#06b6d4',
+    'ZONA DEPORTE': '#f59e0b',
+    'OT DEPORTE': '#ef4444',
+    'SIN ETIQUETA': '#6b7280',
   };
-  for (const k in t) if (cat && cat.toUpperCase().indexOf(k)>=0) return t[k];
-  return "#2563eb";
+  for (const k in M) if ((cat || '').toUpperCase().includes(k)) return M[k];
+  return '#6b7280';
 }
-function popupHTML(c){
-  const row=(l,v)=>!v||String(v).trim()===''?'':`<div style="padding:6px;border-left:3px solid #3a5899"><b>${l}:</b> <span style="opacity:.9">${v}</span></div>`;
-  return `<div style="width:520px;font-family:system-ui;">
-    <div style="background:linear-gradient(135deg,#5b7cff,#7a4ad8);color:#fff;padding:12px;margin:-8px -8px 10px;border-radius:10px;">
-      <div style="font-weight:800">${c.COD_DISTRI||""} — ${c.NOM_DISTRI||""}</div>
-      <div style="opacity:.9;font-size:.9em">🌐 ${Number(c.Latitud).toFixed(6)}, ${Number(c.Longitud).toFixed(6)}</div>
-    </div>
-    ${row("Dirección",c.DIRECCION)}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      ${row("X",c.X)}${row("Y",c.Y)}${row("Parroquia (código)",c.DPA_PARROQ)}${row("Parroquia",c.DPA_DESPAR)}
-      ${row("Cantón (código)",c.DPA_CANTON)}${row("Cantón",c.DPA_DESCAN)}${row("Provincia (código)",c.DPA_PROVIN)}${row("Provincia",c.DPA_DESPRO)}
-      ${row("Zona",c.ZONA)}${row("NMT_25",c.NMT_25)}${row("COMPLEMENT",c.COMPLEMENT)}${row("Capital_Pr",c.Capital_Pr)}
-      ${row("Longitud",c.Longitud)}${row("Latitud",c.Latitud)}
-    </div></div>`;
+function formatCoord(c) {
+  const n = Number(c);
+  return Number.isFinite(n) ? n.toFixed(6) : '—';
 }
-function norm(s){ return (s ?? '').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
 
-/* ===== Estado global ===== */
-let records = [];
+/* ============ ESTADO GLOBAL ============ */
+let records = []; // [{lat,lng,provincia,canton,complement,campos:{...}}]
 let filtered = [];
 let chips = [];
 let provs = [];
 let cantByProv = {};
 let selectedCats = new Set();
-let provLayer=null;
-let supabaseClient = null;
 let SEARCH = { index: [] };
 
-/* ===== Mapa ===== */
-const map = L.map('map', { zoomControl:true, preferCanvas:true }).setView([-1.8312, -78.1834], 6);
-const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap'}).addTo(map);
-const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri' });
-L.control.layers({"Mapa Estándar":osm,"Vista Satelital":sat},{},{collapsed:false}).addTo(map);
-const cluster = L.markerClusterGroup({
-  chunkedLoading:true,
-  maxClusterRadius:60,
-  spiderfyOnMaxZoom:true,
-  showCoverageOnHover:false,
-  disableClusteringAtZoom:15
-});
-map.addLayer(cluster);
+let map, cluster, provLayer;
 
-/* ===== Provincias (TopoJSON o GeoJSON con fallback) ===== */
-async function loadProvincias(){
-  async function tryLoad(url){
-    const r = await fetch(url, {cache:'no-cache'});
-    if(!r.ok) throw new Error('No encontrado: '+url);
+/* ============ POPUP ============ */
+function popupHTML(c) {
+  const row = (l, v) =>
+    !v || String(v).trim() === ''
+      ? ''
+      : `<div style="padding:6px;border-left:3px solid #3a5899"><b>${l}:</b> <span style="opacity:.9">${v}</span></div>`;
+  return `<div style="width:520px;font-family:system-ui;">
+    <div style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:12px;margin:-8px -8px 10px;border-radius:10px;">
+      <div style="font-weight:800">${c.COD_DISTRI || ''} — ${c.NOM_DISTRI || ''}</div>
+      <div style="opacity:.9;font-size:.9em">🌐 ${formatCoord(c.Latitud)}, ${formatCoord(c.Longitud)}</div>
+    </div>
+    ${row('Dirección', c.DIRECCION || c.Direccion)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${row('Provincia', c.DPA_DESPRO)}${row('Cantón', c.DPA_DESCAN)}
+      ${row('Parroquia', c.DPA_DESPAR)}${row('Zona', c.ZONA)}${row('NMT_25', c.NMT_25)}
+      ${row('Tipo', c.COMPLEMENT)}${row('Capital_Pr', c.Capital_Pr)}
+      ${row('X', c.X)}${row('Y', c.Y)}
+      ${row('Longitud', c.Longitud)}${row('Latitud', c.Latitud)}
+    </div>
+  </div>`;
+}
+
+/* ============ MAPA ============ */
+function initMap() {
+  map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([-1.8312, -78.1834], 6);
+
+  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+  }).addTo(map);
+
+  const sat = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: '© Esri' },
+  );
+
+  L.control.layers({ 'Mapa Base': osm, 'Vista Satelital': sat }, {}, { collapsed: false }).addTo(map);
+
+  cluster = L.markerClusterGroup({
+    chunkedLoading: true,
+    maxClusterRadius: 60,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    disableClusteringAtZoom: 15,
+  });
+  map.addLayer(cluster);
+}
+
+/* ============ PROVINCIAS ============ */
+async function loadProvincias() {
+  async function tryLoad(url) {
+    const r = await fetch(url, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
     const j = await r.json();
     if (j && j.type === 'Topology' && typeof topojson !== 'undefined') {
       const first = Object.values(j.objects)[0];
       return topojson.feature(j, first);
     }
-    return j; // ya es GeoJSON
+    return j; // GeoJSON
   }
-  try{
-    const gj = await tryLoad(PATHS.provincias);
-    provLayer = L.geoJSON(gj,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
-  }catch(e){
-    try{
-      const gj2 = await tryLoad(PATHS.provinciasFallback);
-      provLayer = L.geoJSON(gj2,{style:{color:'#7a4ad8',weight:2,opacity:.8,fillOpacity:.05}}).addTo(map);
-    }catch(err){ console.warn('Sin capas de provincias disponibles', err); }
+  try {
+    const gj = await tryLoad(CONFIG.provinciasTopo);
+    provLayer = L.geoJSON(gj, { style: { color: '#7a4ad8', weight: 2, opacity: 0.8, fillOpacity: 0.05 } }).addTo(map);
+    log('Provincias TopoJSON OK');
+  } catch (e) {
+    warn('TopoJSON provincias falló:', e?.message || e);
+    try {
+      const gj2 = await tryLoad(CONFIG.provinciasGeo);
+      provLayer = L.geoJSON(gj2, { style: { color: '#7a4ad8', weight: 2, opacity: 0.8, fillOpacity: 0.05 } }).addTo(map);
+      log('Provincias GeoJSON OK');
+    } catch (err2) {
+      warn('Sin provincias disponibles:', err2?.message || err2);
+    }
   }
 }
 
-/* ===== CSV (fallback) ===== */
-async function loadCSV(){
-  const res = await fetch(PATHS.csv, {cache:'no-cache'});
-  if(!res.ok) throw new Error('No se pudo descargar CSV '+PATHS.csv);
-  const txt = await res.text();
-  const parsed = Papa.parse(txt, { header:true, skipEmptyLines:true });
-  const rows = parsed.data;
+/* ============ CARGA DE DATOS ============ */
+function mapRecord(rec) {
+  const lat =
+    toFloat(rec.Latitud ?? rec.latitud ?? rec.lat ?? rec.Lat ?? rec.Y ?? rec.y);
+  const lng =
+    toFloat(rec.Longitud ?? rec.longitud ?? rec.lng ?? rec.Lng ?? rec.X ?? rec.x);
 
-  const want = k => Object.keys(rows[0]||{}).find(x=>x && x.toLowerCase().trim()==k.toLowerCase());
-  const col = {
-    cod: want('COD_DISTRI') || want('cod_distri') || want('codigo'),
-    nom: want('NOM_DISTRI') || want('nom_distri') || want('distrito'),
-    dir: want('DIRECCION'),
-    x: want('X'), y: want('Y'),
-    parCod: want('DPA_PARROQ'), parNom: want('DPA_DESPAR'),
-    canCod: want('DPA_CANTON'), canNom: want('DPA_DESCAN'),
-    provCod: want('DPA_PROVIN'), provNom: want('DPA_DESPRO'),
-    zona: want('ZONA'), nmt: want('NMT_25'),
-    comp: want('COMPLEMENT'),
-    cap: want('Capital_Pr') || want('capital_pr'),
-    lon: want('Longitud') || want('longitud') || want('lon'),
-    lat: want('Latitud')  || want('latitud')  || want('lat')
+  const item = {
+    lat,
+    lng,
+    provincia: rec.DPA_DESPRO ?? rec.provincia ?? rec.Provincia ?? '',
+    canton: rec.DPA_DESCAN ?? rec.canton ?? rec.Cantón ?? '',
+    complement: (rec.COMPLEMENT ?? rec.complement ?? '').toString() || 'SIN ETIQUETA',
+    campos: {
+      ...rec,
+      Latitud: lat,
+      Longitud: lng,
+      COD_DISTRI:
+        rec.COD_DISTRI ?? rec.codigo ?? rec.codigo_distrito ?? rec.cod ?? rec.cod_distrito ?? rec.Codigo ?? '',
+      NOM_DISTRI: rec.NOM_DISTRI ?? rec.nombre ?? rec.nombre_distrito ?? rec.Nombre ?? '',
+    },
   };
-  const recs = [];
-  for(const r of rows){
-    const lat = toFloat(r[col.lat]), lng = toFloat(r[col.lon]);
-    if(lat==null || lng==null) continue;
-    if(!(lat>=-5.8 && lat<=2.2 && lng>=-92.5 && lng<=-74.0)) continue;
-    recs.push({
-      lat, lng,
-      provincia: (r[col.provNom]||'').toString(),
-      canton: (r[col.canNom]||'').toString(),
-      complement: (r[col.comp]||'').toString() || 'SIN ETIQUETA',
-      campos: {
-        COD_DISTRI:r[col.cod], NOM_DISTRI:r[col.nom], DIRECCION:r[col.dir], X:r[col.x], Y:r[col.y],
-        DPA_PARROQ:r[col.parCod], DPA_DESPAR:r[col.parNom], DPA_CANTON:r[col.canCod], DPA_DESCAN:r[col.canNom],
-        DPA_PROVIN:r[col.provCod], DPA_DESPRO:r[col.provNom], ZONA:r[col.zona], NMT_25:r[col.nmt], COMPLEMENT:r[col.comp],
-        Capital_Pr:r[col.cap], Longitud:r[col.lon], Latitud:r[col.lat]
-      }
-    });
-  }
-  return recs;
+
+  return item;
 }
 
-/* ===== Supabase ===== */
-function initSupabase(){
-  if (!USE_SUPABASE) return null;
-  if (!window.supabase || !window.supabase.createClient) return null;
-  if (!SUPABASE.url || !SUPABASE.anonKey) return null;
-  try{
-    return window.supabase.createClient(SUPABASE.url, SUPABASE.anonKey);
-  }catch(e){
-    console.warn('No se pudo crear cliente de Supabase:', e);
-    return null;
-  }
-}
-async function loadFromSupabase(client){
-  const cols = [
-    'COD_DISTRI','NOM_DISTRI','DIRECCION',
-    'DPA_PARROQ','DPA_DESPAR','DPA_CANTON','DPA_DESCAN',
-    'DPA_PROVIN','DPA_DESPRO','ZONA','NMT_25','COMPLEMENT',
-    'Capital_Pr','Latitud','Longitud'
-  ].join(',');
-  const { data, error } = await client.from('distritos').select(cols);
-  if (error) throw error;
-  return data.map(r => ({
-    lat: Number(r.Latitud),
-    lng: Number(r.Longitud),
-    provincia: r.DPA_DESPRO || '',
-    canton: r.DPA_DESCAN || '',
-    complement: (r.COMPLEMENT || '').toString() || 'SIN ETIQUETA',
-    campos: { ...r }
-  })).filter(d =>
-    Number.isFinite(d.lat) && Number.isFinite(d.lng) &&
-    d.lat>=-5.8 && d.lat<=2.2 && d.lng>=-92.5 && d.lng<=-74.0
+function isValidRecord(r) {
+  return (
+    Number.isFinite(r.lat) &&
+    Number.isFinite(r.lng) &&
+    r.lat >= -5.8 &&
+    r.lat <= 2.2 &&
+    r.lng >= -92.5 &&
+    r.lng <= -74.0
   );
 }
 
-/* ===== Búsqueda avanzada + Autocomplete ===== */
-function buildSearchIndex(){
-  SEARCH.index = records.map(r => ({
+async function loadFromSupabase() {
+  const url = CONFIG.supabaseUrl;
+  const key = CONFIG.supabaseAnonKey;
+  if (!url || !key) return null;
+  if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+    warn('Supabase UMD no está disponible; salto a CSV');
+    return null;
+  }
+  try {
+    const client = window.supabase.createClient(url, key);
+    const cols =
+      'COD_DISTRI,NOM_DISTRI,DIRECCION,DPA_PARROQ,DPA_DESPAR,DPA_CANTON,DPA_DESCAN,DPA_PROVIN,DPA_DESPRO,ZONA,NMT_25,COMPLEMENT,Capital_Pr,Latitud,Longitud';
+    const { data, error } = await client.from('distritos').select(cols);
+    if (error) throw error;
+    const mapped = (data || []).map(mapRecord).filter(isValidRecord);
+    if (mapped.length === 0) {
+      warn('Supabase devolvió 0 registros; usaré CSV');
+      return null;
+    }
+    log(`Supabase OK: ${mapped.length} registros`);
+    return mapped;
+  } catch (e) {
+    warn('Error Supabase:', e?.message || e);
+    return null;
+  }
+}
+
+async function loadFromCsv(url) {
+  const r = await fetch(url, { cache: 'no-cache' });
+  if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
+  const text = await r.text();
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: false });
+  const mapped = parsed.data.map(mapRecord).filter(isValidRecord);
+  return mapped;
+}
+
+async function loadData() {
+  // 1) Supabase
+  const fromSb = await loadFromSupabase();
+  if (fromSb && fromSb.length) return fromSb;
+
+  // 2) CSV relativo
+  try {
+    const fromRel = await loadFromCsv(CONFIG.csvRelative);
+    if (fromRel.length) {
+      log(`CSV relativo OK: ${fromRel.length} registros`);
+      return fromRel;
+    }
+    warn('CSV relativo vacío; intento RAW…');
+  } catch (e) {
+    warn('CSV relativo falló:', e?.message || e);
+  }
+
+  // 3) CSV absoluto RAW
+  const fromAbs = await loadFromCsv(CONFIG.csvAbsolute);
+  if (fromAbs.length) {
+    log(`CSV absoluto OK: ${fromAbs.length} registros`);
+    return fromAbs;
+  }
+  throw new Error('No se pudo cargar datos de ningún origen');
+}
+
+/* ============ BÚSQUEDA Y AUTOCOMPLETE ============ */
+function buildSearchIndex() {
+  SEARCH.index = records.map((r) => ({
     r,
-    text: norm(`${r.campos.COD_DISTRI||''} ${r.campos.NOM_DISTRI||''} ${r.provincia||''} ${r.canton||''}`)
+    text: norm(`${r.campos.COD_DISTRI || ''} ${r.campos.NOM_DISTRI || ''} ${r.provincia || ''} ${r.canton || ''}`),
   }));
 }
-function searchTop(q, limit=8){
+function searchTop(q, limit = 8) {
   q = norm(q);
-  if(!q) return [];
+  if (!q) return [];
   const words = q.split(/\s+/).filter(Boolean);
   const out = [];
-  for(const item of SEARCH.index){
+  for (const item of SEARCH.index) {
     const t = item.text;
     let score = 0;
     if (t === q) score += 200;
     if (t.startsWith(q)) score += 120;
     if (t.includes(q)) score += 60;
-    for (const w of words){ if (t.includes(w)) score += 10; }
-    if (score>0) out.push({r:item.r, score});
+    for (const w of words) if (t.includes(w)) score += 10;
+    if (score > 0) out.push({ r: item.r, score });
   }
-  out.sort((a,b)=>b.score-a.score);
-  return out.slice(0,limit).map(x=>x.r);
-}
-function openPopupFor(r){
-  let found=null;
-  cluster.eachLayer(l=>{
-    const p=l.getLatLng();
-    if (Math.abs(p.lat-r.lat)<1e-6 && Math.abs(p.lng-r.lng)<1e-6) found=l;
-  });
-  map.setView([r.lat,r.lng], 12);
-  if(found){
-    found.openPopup();
-    if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
-  }
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, limit).map((x) => x.r);
 }
 
-/* Autocomplete UI */
-let suggestEl=null, activeIndex=-1, lastSuggestRows=[];
-function setupSuggest(){
-  const qEl = Q('#q'); const wrap = qEl.parentElement;
+let suggestEl = null,
+  activeIndex = -1,
+  lastSuggestRows = [];
+function setupSuggest() {
+  const qEl = $('#q');
+  if (!qEl) return;
+  const wrap = qEl.parentElement;
   wrap.style.position = 'relative';
-  suggestEl = Q('#suggest');
+  suggestEl = document.createElement('div');
+  suggestEl.id = 'suggest';
+  Object.assign(suggestEl.style, {
+    position: 'absolute',
+    top: qEl.offsetTop + qEl.offsetHeight + 6 + 'px',
+    left: qEl.offsetLeft + 'px',
+    right: 0,
+    background: '#0a1c3b',
+    border: '1px solid #284a91',
+    borderRadius: '8px',
+    display: 'none',
+    maxHeight: '260px',
+    overflowY: 'auto',
+    zIndex: 1000,
+  });
+  wrap.appendChild(suggestEl);
   qEl.addEventListener('input', onSearchInput);
   qEl.addEventListener('keydown', onSearchKey);
-  qEl.addEventListener('blur', ()=> setTimeout(()=>suggestEl.style.display='none',150));
+  qEl.addEventListener('blur', () => setTimeout(() => (suggestEl.style.display = 'none'), 150));
 }
-function onSearchInput(e){
+function onSearchInput(e) {
   const q = e.target.value;
   applyFilters(true);
   lastSuggestRows = searchTop(q, 8);
   renderSuggest(lastSuggestRows);
 }
-function onSearchKey(e){
-  if(suggestEl.style.display!=='block') return;
+function onSearchKey(e) {
+  if (suggestEl.style.display !== 'block') return;
   const n = suggestEl.children.length;
-  if (e.key==='ArrowDown'){ e.preventDefault(); activeIndex=(activeIndex+1)%n; highlight(); }
-  else if (e.key==='ArrowUp'){ e.preventDefault(); activeIndex=(activeIndex-1+n)%n; highlight(); }
-  else if (e.key==='Enter'){
+  if (e.key === 'ArrowDown') {
     e.preventDefault();
-    const target = activeIndex>=0 ? lastSuggestRows[activeIndex] : lastSuggestRows[0];
-    if(target){ suggestEl.style.display='none'; openPopupFor(target); }
+    activeIndex = (activeIndex + 1) % n;
+    highlight();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    activeIndex = (activeIndex - 1 + n) % n;
+    highlight();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const target = activeIndex >= 0 ? lastSuggestRows[activeIndex] : lastSuggestRows[0];
+    if (target) {
+      suggestEl.style.display = 'none';
+      openPopupFor(target);
+    }
   }
 }
-function renderSuggest(rows){
-  suggestEl.innerHTML=''; activeIndex=-1;
-  if(!rows.length){ suggestEl.style.display='none'; return; }
-  rows.forEach((r,i)=>{
-    const div=document.c
+function renderSuggest(rows) {
+  suggestEl.innerHTML = '';
+  activeIndex = -1;
+  if (!rows.length) {
+    suggestEl.style.display = 'none';
+    return;
+  }
+  rows.forEach((r, i) => {
+    const div = document.createElement('div');
+    div.textContent = `${r.campos.COD_DISTRI || ''} — ${r.campos.NOM_DISTRI || ''} (${r.provincia}/${r.canton})`;
+    Object.assign(div.style, { padding: '8px 10px', cursor: 'pointer' });
+    div.onmouseenter = () => {
+      activeIndex = i;
+      highlight();
+    };
+    div.onclick = () => {
+      suggestEl.style.display = 'none';
+      openPopupFor(r);
+    };
+    suggestEl.appendChild(div);
+  });
+  suggestEl.style.display = 'block';
+}
+function highlight() {
+  Array.from(suggestEl.children).forEach((el, i) => {
+    el.style.background = i === activeIndex ? '#143166' : 'transparent';
+  });
+}
+function openPopupFor(r) {
+  let found = null;
+  cluster.eachLayer((l) => {
+    const p = l.getLatLng();
+    if (Math.abs(p.lat - r.lat) < 1e-6 && Math.abs(p.lng - r.lng) < 1e-6) found = l;
+  });
+  map.setView([r.lat, r.lng], 12);
+  if (found) {
+    found.openPopup();
+    if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
+  }
+}
+
+/* ============ UI ============ */
+function makeChips() {
+  const c = {};
+  for (const r of records) {
+    const k = r.complement && r.complement.trim() ? r.complement : 'SIN ETIQUETA';
+    c[k] = (c[k] || 0) + 1;
+  }
+  chips = Object.entries(c)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([nombre, count]) => ({ nombre, count }));
+  const box = $('#chips');
+  if (!box) return;
+  box.innerHTML = '';
+  chips.forEach((ch) => {
+    const el = document.createElement('button');
+    el.className = 'chip';
+    el.textContent = `${ch.nombre} (${ch.count})`;
+    el.onclick = () => {
+      if (el.classList.contains('active')) {
+        el.classList.remove('active');
+        selectedCats.delete(ch.nombre);
+      } else {
+        el.classList.add('active');
+        selectedCats.add(ch.nombre);
+      }
+      applyFilters(true);
+    };
+    box.appendChild(el);
+  });
+}
+function buildCombos() {
+  const setProv = new Set(records.map((r) => r.provincia).filter(Boolean));
+  provs = Array.from(setProv).sort((a, b) => a.localeCompare(b));
+  const provSel = $('#provSel');
+  const cantSel = $('#cantonSel');
+  if (!provSel || !cantSel) return;
+
+  provSel.innerHTML = '<option value="">Todas</option>' + provs.map((p) => `<option>${p}</option>`).join('');
+  cantByProv = {};
+  for (const r of records) {
+    const p = r.provincia || '';
+    const c = r.canton || '';
+    cantByProv[p] = cantByProv[p] || new Set();
+    if (c) cantByProv[p].add(c);
+  }
+  provSel.onchange = () => {
+    const p = provSel.value;
+    const cants = Array.from(cantByProv[p] || new Set()).sort((a, b) => a.localeCompare(b));
+    cantSel.innerHTML = '<option value="">Todos</option>' + cants.map((c) => `<option>${c}</option>`).join('');
+    applyFilters(true);
+  };
+  cantSel.onchange = () => applyFilters(true);
+}
+function markerFor(r) {
+  const m = L.circleMarker([r.lat, r.lng], {
+    radius: 8,
+    fillColor: colorFor(r.complement),
+    color: '#fff',
+    weight: 2,
+    fillOpacity: 0.95,
+  });
+  m.bindPopup(popupHTML(r.campos), { maxWidth: 560, autoPan: false });
+  m.bindTooltip(`${r.campos.COD_DISTRI || ''}`, { permanent: false, direction: 'top', opacity: 0.85 });
+  m.on('click', () => {
+    if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
+  });
+  return m;
+}
+function render() {
+  cluster.clearLayers();
+  filtered.forEach((r) => cluster.addLayer(markerFor(r)));
+
+  const forced = CONFIG.forceTotalCount;
+  const totalShown = forced ?? records.length;
+
+  const nTotalEl = $('#nTotal');
+  const nFiltEl = $('#nFilt');
+  const counterEl = $('#counter');
+  if (nTotalEl) nTotalEl.textContent = totalShown.toLocaleString();
+  if (nFiltEl) nFiltEl.textContent = filtered.length.toLocaleString();
+  if (counterEl) counterEl.innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles`;
+
+  if (window.updateDashboard) window.updateDashboard(records, filtered);
+}
+function applyFilters(updateUrl = false) {
+  const q = $('#q')?.value.trim() || '';
+  const p = $('#provSel')?.value || '';
+  const c = $('#cantonSel')?.value || '';
+
+  filtered = records.filter((r) => {
+    if (p && r.provincia !== p) return false;
+    if (c && r.canton !== c) return false;
+    if (selectedCats.size > 0 && !selectedCats.has(r.complement)) return false;
+    if (q) {
+      const hay = norm(`${r.campos.COD_DISTRI || ''} ${r.campos.NOM_DISTRI || ''} ${r.provincia || ''} ${r.canton || ''}`);
+      if (!hay.includes(norm(q))) return false;
+    }
+    return true;
+  });
+
+  if (updateUrl) {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (p) params.set('prov', p);
+    if (c) params.set('canton', c);
+    if (selectedCats.size > 0) params.set('cats', Array.from(selectedCats).join('|'));
+    history.replaceState(null, '', '?' + params.toString());
+  }
+  render();
+}
+function loadFromURL() {
+  const u = new URL(location.href);
+  const q = u.searchParams.get('q') || '';
+  const p = u.searchParams.get('prov') || '';
+  const c = u.searchParams.get('canton') || '';
+  const cats = (u.searchParams.get('cats') || '').split('|').filter(Boolean);
+
+  if ($('#q')) $('#q').value = q;
+  if (p && $('#provSel')) $('#provSel').value = p;
+  if (p && $('#cantonSel')) {
+    const cants = Array.from(cantByProv[p] || new Set()).sort((a, b) => a.localeCompare(b));
+    $('#cantonSel').innerHTML = '<option value="">Todos</option>' + cants.map((x) => `<option>${x}</option>`).join('');
+    if (c) $('#cantonSel').value = c;
+  }
+  const box = $('#chips');
+  cats.forEach((cat) => {
+    selectedCats.add(cat);
+    if (box)
+      Array.from(box.children).forEach((b) => {
+        if (b.textContent.startsWith(cat + ' ')) b.classList.add('active');
+      });
+  });
+}
+function exportCSV() {
+  if (!filtered.length) {
+    alert('No hay registros filtrados para exportar.');
+    return;
+  }
+  const cols = Object.keys(filtered[0].campos);
+  const lines = [cols.join(',')];
+  filtered.forEach((r) => {
+    const row = cols
+      .map((k) => {
+        const v = (r.campos[k] ?? '').toString().replace(/"/g, '""');
+        return `"${v}"`;
+      })
+      .join(',');
+    lines.push(row);
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `distritos_filtrados_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+/* ============ ARRANQUE ============ */
+async function init() {
+  const loading = $('#loading');
+  try {
+    // Opcional: logo (no rompe si falla)
+    fetch(CONFIG.logo).catch(() => {});
+
+    initMap();
+    await loadProvincias();
+
+    // Datos
+    records = await loadData();
+    if (!records.length) throw new Error('0 registros cargados');
+
+    // Índices y UI
+    buildSearchIndex();
+    setupSuggest();
+    makeChips();
+    buildCombos();
+    loadFromURL();
+
+    // Listeners
+    $('#q')?.addEventListener('input', () => applyFilters(true));
+    $('#btnAll')?.addEventListener('click', () => {
+      if ($('#q')) $('#q').value = '';
+      if ($('#provSel')) $('#provSel').value = '';
+      if ($('#cantonSel')) $('#cantonSel').innerHTML = '<option value="">Todos</option>';
+      selectedCats.clear();
+      document.querySelectorAll('.chip.active').forEach((x) => x.classList.remove('active'));
+      history.replaceState(null, '', ' ');
+      applyFilters(false);
+    });
+    $('#btnExport')?.addEventListener('click', exportCSV);
+    $('#btnProv')?.addEventListener('click', () => {
+      if (!provLayer) return;
+      if (map.hasLayer(provLayer)) {
+        map.removeLayer(provLayer);
+        $('#btnProv').textContent = 'Provincias: OFF';
+      } else {
+        provLayer.addTo(map);
+        $('#btnProv').textContent = 'Provincias: ON';
+      }
+    });
+
+    // Vista inicial centrada en promedio
+    const avgLat = records.reduce((s, r) => s + r.lat, 0) / records.length;
+    const avgLng = records.reduce((s, r) => s + r.lng, 0) / records.length;
+    map.setView([avgLat, avgLng], 6);
+
+    filtered = records.slice();
+    render();
+
+    log(`✅ Sistema iniciado con ${records.length} registros`);
+  } catch (e) {
+    err('Error inicializando el sistema:', e?.message || e);
+    const counterEl = $('#counter');
+    if (counterEl) counterEl.innerHTML = '❌ Error cargando datos';
+    alert(
+      'Error cargando el sistema.\n\n' +
+        (e?.message || e) +
+        '\n\nRevisa:\n' +
+        '1) Que el CSV exista y el path sea correcto (intenta abrir data/distritos.csv en el navegador).\n' +
+        '2) Políticas RLS de Supabase (SELECT para rol "anon").\n' +
+        '3) Encabezados Latitud/Longitud válidos.',
+    );
+  } finally {
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+// ¡A jugar!
+init();

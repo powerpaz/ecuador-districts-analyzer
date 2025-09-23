@@ -4,25 +4,21 @@
 
 /* =================== CONFIG =================== */
 const CONFIG = {
-  // CSV relativo (si /data está junto a index.html)
+  // CSVs (fallback)
   csvRelative: 'data/distritos.csv',
+  csvAbsolute: 'https://raw.githubusercontent.com/powerpaz/ecuador-districts-analyzer/main/data/distritos.csv',
 
-  // CSV absoluto (RAW GitHub) — ajusta usuario/repo/rama si cambias
-  csvAbsolute:
-    'https://raw.githubusercontent.com/powerpaz/ecuador-distrits-analyzer/main/data/distritos.csv'
-      .replace('distrits', 'districts'), // por si lo pego mal 😅
-
-  // TopoJSON/GeoJSON de provincias (primero intenta .json; si no, .geojson)
+  // Provincias
   provinciasTopo: 'data/provincias.json',
   provinciasGeo: 'data/provincias.geojson',
 
-  // Logo opcional (no detiene la app si no existe)
+  // Logo (opcional)
   logo: 'logo.png',
 
-  // Fuerza contador total visible en cabecera; pon null para que sea dinámico
+  // Fuerza contador total (o null para dinámico)
   forceTotalCount: 140,
 
-  // Supabase (deja url/anonKey en "" si quieres desactivarlo)
+  // === Supabase (tu proyecto) ===
   supabaseUrl: 'https://eunujfywdwipguopstru.supabase.co',
   supabaseAnonKey:
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs',

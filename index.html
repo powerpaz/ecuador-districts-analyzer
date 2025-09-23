@@ -41,13 +41,32 @@
   .stat{background:#111827;border:1px solid var(--b);border-radius:10px;padding:10px 12px}
   .stat b{color:#fff}
   #counter{margin-top:8px;color:#D1D5DB}
+
   /* Autocomplete */
   #suggest div{border-bottom:1px solid #284a91}
+
   /* Loading */
   #loading{position:fixed;inset:0;background:rgba(11,20,38,.96);display:flex;align-items:center;justify-content:center;z-index:9999}
   #loading .box{text-align:center}
   #loading .spin{width:44px;height:44px;border:3px solid #30384a;border-top:3px solid #3B82F6;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px}
   @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Popup elegante y legible */
+  .leaflet-popup.nice-popup .leaflet-popup-content-wrapper{
+    background:#0b132b;
+    color:#e5e7eb;
+    border:1px solid #284a91;
+    border-radius:14px;
+    box-shadow:0 18px 45px rgba(0,0,0,.45);
+  }
+  .leaflet-popup.nice-popup .leaflet-popup-tip{
+    background:#0b132b;
+    border:1px solid #284a91;
+  }
+  .leaflet-popup-content{ margin:12px 14px; }
+
+  /* Baja un poco el control de capas para que no choque con el popup */
+  .leaflet-control-layers{ margin-top:60px; }
 </style>
 </head>
 <body>
@@ -107,10 +126,15 @@
 <!-- NO-OPS opcionales para evitar errores si el JS las llama -->
 <script>
   window.showDistritoDetails = function (campos) {
+    // Soporta snake_case (Supabase) y fallback a UPPERCASE si llega CSV distinto
+    const cod = campos.cod_distri ?? campos.COD_DISTRI ?? '';
+    const nom = campos.nom_distri ?? campos.NOM_DISTRI ?? '';
+    const prov = campos.dpa_despro ?? campos.DPA_DESPRO ?? '';
+    const can  = campos.dpa_descan ?? campos.DPA_DESCAN ?? '';
     const d = document.getElementById('details');
     d.innerHTML = `
-      <div><b>${campos.COD_DISTRI||''}</b> — ${campos.NOM_DISTRI||''}</div>
-      <div style="opacity:.8">Provincia: ${campos.DPA_DESPRO||''} • Cantón: ${campos.DPA_DESCAN||''}</div>`;
+      <div><b>${cod}</b> — ${nom}</div>
+      <div style="opacity:.8">Provincia: ${prov} • Cantón: ${can}</div>`;
   };
   window.updateDashboard = function(){/* coloca KPIs/Chart.js si luego quieres */};
 </script>

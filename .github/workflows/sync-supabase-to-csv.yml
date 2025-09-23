@@ -1,32 +1,53 @@
 name: Sync Supabase -> CSV
+
 on:
-  schedule: [{ cron: "0 6 * * *" }]  # diario 06:00 UTC
+  schedule:
+    - cron: "0 6 * * *"   # diario 06:00 UTC
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          curl -s "${SUPABASE_URL}/rest/v1/distritos?select=COD_DISTRI,NOM_DISTRI,DIRECCION,DPA_PARROQ,DPA_DESPAR,DPA_CANTON,DPA_DESCAN,DPA_PROVIN,DPA_DESPRO,ZONA,NMT_25,COMPLEMENT,Capital_Pr,Latitud,Longitud&limit=10000"
-            -H "apikey: ${SUPABASE_ANON_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" > data/distritos.json
 
-          jq -r '(.[0] | keys_unsorted) as $k | $k, (.[] | [.[ $k[] ]]) | @csv' data/distritos.json > data/distritos.csv
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Download from Supabase via REST
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          mkdir -p data
+
+          curl -s "${SUPABASE_URL}/rest/v1/distritos?select=cod_distri,nom_distri,direccion,dpa_parroq,dpa_despar,dpa_canton,dpa_descan,dpa_provin,dpa_despro,zona,nmt_25,complement,capital_pr,latitud,longitud&order=cod_distri.asc&limit=10000" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+          > data/distritos.json
+
+          # JSON -> CSV con encabezados
+          jq -r '
+            (.[0] | keys_unsorted) as $h
+            | ($h | @csv),
+              (.[] | [.[ $h[] ]] | @csv)
+          ' data/distritos.json > data/distritos.csv
 
           rm -f data/distritos.json
 
+      - name: Commit CSV if changed
+        run: |
           if git diff --quiet -- data/distritos.csv; then
             echo "No changes"
           else
-            git config user.name  "github-actions"
-            git config user.email "actions@github.com"
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add data/distritos.csv
             git commit -m "Sync CSV from Supabase"
             git push
           fi
-        env:
-          SUPABASE_URL: ${{ https://eunujfywdwipguopstru.supabase.co }}
-          SUPABASE_ANON_KEY: ${{ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bnVqZnl3ZHdpcGd1b3BzdHJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg1NzM3MDksImV4cCI6MjA3NDE0OTcwOX0.Jf-QSpS6K0yh_JCX1IVtEC8Amq1Or9XwLjc9dtsxLAs}}
-

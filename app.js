@@ -80,54 +80,47 @@ let map, cluster, provLayer;
 let DATA_SOURCE = 'desconocido';
 
 // ============ POPUP (solo columnas en minúsculas; fallback a MAYÚSCULAS) ============
-function popupHTML(c) {
-  // lector seguro: primero minúsculas, si no existen prueba MAYÚSCULAS
-  const get = (lo, up) => (c?.[lo] ?? c?.[up] ?? '');
+function markerFor(r){
+  const m = L.circleMarker([r.lat, r.lng],{
+    radius:8,
+    fillColor:colorFor(r.complement),
+    color:'#fff',
+    weight:2,
+    fillOpacity:.95
+  });
 
-  // helper para no imprimir filas vacías
-  const row = (label, lo, up) => {
-    const v = get(lo, up);
-    return (v == null || String(v).trim() === '')
-      ? ''
-      : `<div style="padding:8px 10px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.03)">
-           <div style="font-size:.72rem;letter-spacing:.02em;opacity:.75;text-transform:uppercase">${label}</div>
-           <div style="font-weight:600">${v}</div>
-         </div>`;
-  };
+  m.bindPopup(
+    popupHTML(r.campos),
+    {
+      className: 'nice-popup',         // <- aplica el CSS de arriba
+      minWidth: 320,
+      maxWidth: 520,
+      closeButton: true,
+      autoPan: true,                   // <- que el mapa se mueva para encuadrar
+      keepInView: true,                // <- no permitas que se “escape” del viewport
+      autoPanPadding: [40,40],         // <- márgenes generales
+      // amortigua la esquina sup. derecha donde está el control de capas
+      autoPanPaddingTopLeft: [40,80],
+      autoPanPaddingBottomRight: [60,40]
+    }
+  );
 
-  const cod = get('cod_distri','COD_DISTRI');
-  const nom = get('nom_distri','NOM_DISTRI');
-  const prov = get('dpa_despro','DPA_DESPRO');
-  const cant = get('dpa_descan','DPA_DESCAN');
+  m.bindTooltip(`${r.campos.cod_distri || r.campos.COD_DISTRI || ''}`,{
+    permanent:false, direction:'top', opacity:.9
+  });
 
-  return `
-    <div style="min-width:320px;max-width:520px;font-family:system-ui,Segoe UI,Inter,Roboto,sans-serif">
-      <!-- Encabezado -->
-      <div style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:14px 16px;border-radius:12px;margin:-6px -6px 12px -6px;box-shadow:0 6px 18px rgba(0,0,0,.25)">
-        <div style="font-weight:800;font-size:1rem;line-height:1.15">
-          ${nom || ''} ${cod ? `<span style="opacity:.9;font-weight:600">(${cod})</span>` : ''}
-        </div>
-        <div style="opacity:.9;font-size:.85rem;margin-top:2px">
-          ${prov || ''}${cant ? ' • ' + cant : ''}
-        </div>
-      </div>
+  // Al abrir el popup, centra suavemente el punto
+  m.on('popupopen', (e)=>{
+    // usa flyTo para un centrado suave sin cambiar demasiado el zoom
+    map.flyTo(e.popup.getLatLng(), Math.max(map.getZoom(), 8), { duration: 0.5 });
+  });
 
-      <!-- Cuerpo (solo los campos solicitados) -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        ${row('Dirección','direccion','DIRECCION')}
-        ${row('Parroquia (código)','dpa_parroq','DPA_PARROQ')}
-        ${row('Parroquia','dpa_despar','DPA_DESPAR')}
-        ${row('Cantón (código)','dpa_canton','DPA_CANTON')}
-        ${row('Cantón','dpa_descan','DPA_DESCAN')}
-        ${row('Provincia (código)','dpa_provin','DPA_PROVIN')}
-        ${row('Provincia','dpa_despro','DPA_DESPRO')}
-        ${row('Zona','zona','ZONA')}
-        ${row('NMT_25','nmt_25','NMT_25')}
-        ${row('Categoría','complement','COMPLEMENT')}
-        ${row('Capital_Pr','capital_pr','Capital_Pr')}
-      </div>
-    </div>
-  `;
+  // Click: muestra detalles si los tienes
+  m.on('click', ()=>{
+    if (window.showDistritoDetails) window.showDistritoDetails(r.campos);
+  });
+
+  return m;
 }
 
 /* ============ MAPA ============ */

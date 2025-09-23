@@ -4,11 +4,11 @@
 
 /* =================== CONFIG =================== */
 const CONFIG = {
-  // CSVs (fallback)
+  // CSV (fallbacks)
   csvRelative: 'data/distritos.csv',
   csvAbsolute: 'https://raw.githubusercontent.com/powerpaz/ecuador-districts-analyzer/main/data/distritos.csv',
 
-  // Provincias
+  // Provincias (TopoJSON primero; si falla, GeoJSON)
   provinciasTopo: 'data/provincias.json',
   provinciasGeo: 'data/provincias.geojson',
 
@@ -72,10 +72,9 @@ let provs = [];
 let cantByProv = {};
 let selectedCats = new Set();
 let SEARCH = { index: [] };
-
 let map, cluster, provLayer;
 
-/* ===== Indicador de origen de datos ===== */
+// Muestra de dónde vienen los datos (Supabase / CSV relativo / CSV RAW)
 let DATA_SOURCE = 'desconocido';
 
 /* ============ POPUP ============ */
@@ -158,7 +157,7 @@ function mapRecord(rec) {
   const lat = toFloat(rec.Latitud ?? rec.latitud ?? rec.lat ?? rec.Lat ?? rec.Y ?? rec.y);
   const lng = toFloat(rec.Longitud ?? rec.longitud ?? rec.lng ?? rec.Lng ?? rec.X ?? rec.x);
 
-  const item = {
+  return {
     lat,
     lng,
     provincia: rec.DPA_DESPRO ?? rec.provincia ?? rec.Provincia ?? '',
@@ -168,26 +167,21 @@ function mapRecord(rec) {
       ...rec,
       Latitud: lat,
       Longitud: lng,
-      COD_DISTRI:
-        rec.COD_DISTRI ?? rec.codigo ?? rec.codigo_distrito ?? rec.cod ?? rec.cod_distrito ?? rec.Codigo ?? '',
+      COD_DISTRI: rec.COD_DISTRI ?? rec.codigo ?? rec.codigo_distrito ?? rec.cod ?? rec.cod_distrito ?? rec.Codigo ?? '',
       NOM_DISTRI: rec.NOM_DISTRI ?? rec.nombre ?? rec.nombre_distrito ?? rec.Nombre ?? '',
     },
   };
-  return item;
 }
-
 function isValidRecord(r) {
   return (
     Number.isFinite(r.lat) &&
     Number.isFinite(r.lng) &&
-    r.lat >= -5.8 &&
-    r.lat <= 2.2 &&
-    r.lng >= -92.5 &&
-    r.lng <= -74.0
+    r.lat >= -5.8 && r.lat <= 2.2 &&
+    r.lng >= -92.5 && r.lng <= -74.0
   );
 }
 
-// === Supabase con alias correctos (alias:columna) ===
+// === Supabase con alias correctos (ALIAS:columna para PostgREST) ===
 async function loadFromSupabase() {
   const url = CONFIG.supabaseUrl;
   const key = CONFIG.supabaseAnonKey;
@@ -198,8 +192,6 @@ async function loadFromSupabase() {
   }
   try {
     const client = window.supabase.createClient(url, key);
-
-    // OJO: PostgREST usa "ALIAS:columna", no "AS"
     const cols = [
       'COD_DISTRI:cod_distri',
       'NOM_DISTRI:nom_distri',
@@ -218,10 +210,7 @@ async function loadFromSupabase() {
       'Longitud:longitud'
     ].join(',');
 
-    const { data, error } = await client
-      .from('distritos')     // nombre exacto de la tabla
-      .select(cols);
-
+    const { data, error } = await client.from('distritos').select(cols);
     if (error) throw error;
 
     const mapped = (data || []).map(mapRecord).filter(isValidRecord);
@@ -229,13 +218,39 @@ async function loadFromSupabase() {
       warn('Supabase devolvió 0 registros; usaré CSV');
       return null;
     }
-
     log(`Supabase OK: ${mapped.length} registros`);
     return mapped;
   } catch (e) {
     warn('Error Supabase:', e?.message || e);
     return null;
   }
+}
+
+async function loadFromCsv(url) {
+  const r = await fetch(url, { cache: 'no-cache' });
+  if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
+  const text = await r.text();
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: false });
+  const mapped = parsed.data.map(mapRecord).filter(isValidRecord);
+  return mapped;
+}
+
+// === Selección de fuente con indicador DATA_SOURCE ===
+async function loadData() {
+  const fromSb = await loadFromSupabase();
+  if (fromSb?.length) { DATA_SOURCE = 'Supabase'; return fromSb; }
+
+  try {
+    const fromRel = await loadFromCsv(CONFIG.csvRelative);
+    if (fromRel.length) { DATA_SOURCE = 'CSV relativo'; return fromRel; }
+  } catch (e) {
+    warn('CSV relativo falló:', e?.message || e);
+  }
+
+  const fromAbs = await loadFromCsv(CONFIG.csvAbsolute);
+  if (fromAbs.length) { DATA_SOURCE = 'CSV RAW'; return fromAbs; }
+
+  throw new Error('No se pudo cargar datos de ningún origen');
 }
 
 /* ============ BÚSQUEDA Y AUTOCOMPLETE ============ */
@@ -263,9 +278,7 @@ function searchTop(q, limit = 8) {
   return out.slice(0, limit).map((x) => x.r);
 }
 
-let suggestEl = null,
-  activeIndex = -1,
-  lastSuggestRows = [];
+let suggestEl = null, activeIndex = -1, lastSuggestRows = [];
 function setupSuggest() {
   const qEl = $('#q');
   if (!qEl) return;
@@ -426,8 +439,6 @@ function markerFor(r) {
   });
   return m;
 }
-
-/* ===== NUEVO: contador con fuente de datos ===== */
 function render() {
   cluster.clearLayers();
   filtered.forEach((r) => cluster.addLayer(markerFor(r)));
@@ -437,13 +448,13 @@ function render() {
   if ($('#nTotal')) $('#nTotal').textContent = totalShown.toLocaleString();
   if ($('#nFilt')) $('#nFilt').textContent = filtered.length.toLocaleString();
 
-  const el = document.querySelector('#counter');
-  if (el)
-    el.innerHTML = `${totalShown} distritos • filtros activos: ${filtered.length} visibles <span style="opacity:.7">(${DATA_SOURCE})</span>`;
+  const el = $('#counter');
+  if (el) el.innerHTML =
+    `${totalShown} distritos • filtros activos: ${filtered.length} visibles ` +
+    `<span style="opacity:.7">(${DATA_SOURCE})</span>`;
 
   if (window.updateDashboard) window.updateDashboard(records, filtered);
 }
-
 function applyFilters(updateUrl = false) {
   const q = $('#q')?.value.trim() || '';
   const p = $('#provSel')?.value || '';
@@ -454,9 +465,7 @@ function applyFilters(updateUrl = false) {
     if (c && r.canton !== c) return false;
     if (selectedCats.size > 0 && !selectedCats.has(r.complement)) return false;
     if (q) {
-      const hay = norm(
-        `${r.campos.COD_DISTRI || ''} ${r.campos.NOM_DISTRI || ''} ${r.provincia || ''} ${r.canton || ''}`,
-      );
+      const hay = norm(`${r.campos.COD_DISTRI || ''} ${r.campos.NOM_DISTRI || ''} ${r.provincia || ''} ${r.canton || ''}`);
       if (!hay.includes(norm(q))) return false;
     }
     return true;
@@ -479,7 +488,7 @@ function loadFromURL() {
   const c = u.searchParams.get('canton') || '';
   const cats = (u.searchParams.get('cats') || '').split('|').filter(Boolean);
 
-  $('#q') && ($('#q').value = q);
+  if ($('#q')) $('#q').value = q;
   if (p && $('#provSel')) $('#provSel').value = p;
   if (p && $('#cantonSel')) {
     const cants = Array.from(cantByProv[p] || new Set()).sort((a, b) => a.localeCompare(b));
@@ -522,29 +531,25 @@ function exportCSV() {
 async function init() {
   const loading = $('#loading');
   try {
-    // Opcional: logo (no rompe si falla)
-    fetch(CONFIG.logo).catch(() => {});
+    fetch(CONFIG.logo).catch(() => {}); // opcional
 
     initMap();
     await loadProvincias();
 
-    // Datos
     records = await loadData();
     if (!records.length) throw new Error('0 registros cargados');
 
-    // Índices y UI
     buildSearchIndex();
     setupSuggest();
     makeChips();
     buildCombos();
     loadFromURL();
 
-    // Listeners
     $('#q')?.addEventListener('input', () => applyFilters(true));
     $('#btnAll')?.addEventListener('click', () => {
-      $('#q') && ($('#q').value = '');
-      $('#provSel') && ($('#provSel').value = '');
-      $('#cantonSel') && ($('#cantonSel').innerHTML = '<option value="">Todos</option>');
+      if ($('#q')) $('#q').value = '';
+      if ($('#provSel')) $('#provSel').value = '';
+      if ($('#cantonSel')) $('#cantonSel').innerHTML = '<option value="">Todos</option>';
       selectedCats.clear();
       document.querySelectorAll('.chip.active').forEach((x) => x.classList.remove('active'));
       history.replaceState(null, '', ' ');
@@ -562,7 +567,7 @@ async function init() {
       }
     });
 
-    // Vista inicial centrada en promedio
+    // Vista inicial (promedio)
     const avgLat = records.reduce((s, r) => s + r.lat, 0) / records.length;
     const avgLng = records.reduce((s, r) => s + r.lng, 0) / records.length;
     map.setView([avgLat, avgLng], 6);
@@ -573,14 +578,14 @@ async function init() {
     log(`✅ Sistema iniciado con ${records.length} registros`);
   } catch (e) {
     err('Error inicializando el sistema:', e?.message || e);
-    $('#counter') && ($('#counter').innerHTML = '❌ Error cargando datos');
+    if ($('#counter')) $('#counter').innerHTML = '❌ Error cargando datos';
     alert(
       'Error cargando el sistema.\n\n' +
-        (e?.message || e) +
-        '\n\nRevisa:\n' +
-        '1) Que el CSV exista y el path sea correcto (intenta abrir data/distritos.csv en el navegador).\n' +
-        '2) Políticas RLS de Supabase (SELECT para rol "anon").\n' +
-        '3) Encabezados Latitud/Longitud válidos.',
+      (e?.message || e) +
+      '\n\nRevisa:\n' +
+      '1) Que el CSV exista y el path sea correcto (intenta abrir data/distritos.csv en el navegador).\n' +
+      '2) Políticas RLS de Supabase (SELECT para rol "anon").\n' +
+      '3) Encabezados Latitud/Longitud válidos.'
     );
   } finally {
     if (loading) loading.style.display = 'none';
